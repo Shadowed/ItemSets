@@ -15,4 +15,5 @@ localization.deDE.lua
 localization.frFR.lua
 
 ItemSets.lua
+character.lua
 options.lua

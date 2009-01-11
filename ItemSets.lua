@@ -5,19 +5,20 @@
 ItemSets = LibStub("AceAddon-3.0"):NewAddon("ItemSets", "AceEvent-3.0")
 
 local L = ItemSetLocals
-local equipSlots = {"HeadSlot", "NeckSlot", "ShoulderSlot", "BackSlot", "ChestSlot", "ShirtSlot", 
-"TabardSlot", "WristSlot", "HandsSlot", "WaistSlot", "LegsSlot", "FeetSlot", "Finger0Slot", 
-"Finger1Slot", "Trinket0Slot", "Trinket1Slot", "SecondaryHandSlot", "MainHandSlot", "RangedSlot", "AmmoSlot"}
+local equipSlots = {["HeadSlot"] = -1, ["NeckSlot"] = -1, ["ShoulderSlot"] = -1, ["BackSlot"] = -1, ["ChestSlot"] = -1, ["ShirtSlot"] = -1, 
+["TabardSlot"] = -1, ["WristSlot"] = -1, ["HandsSlot"] = -1, ["WaistSlot"] = -1, ["LegsSlot"] = -1, ["FeetSlot"] = -1, ["Finger0Slot"] = -1, 
+["Finger1Slot"] = -1, ["Trinket0Slot"] = -1, ["Trinket1Slot"] = -1, ["SecondaryHandSlot"] = -1, ["MainHandSlot"] = -1, ["RangedSlot"] = -1, ["AmmoSlot"] = -1}
 local badTGWeaponType = {["Polearms"] = true, ["Staves"] = true, ["Fishing Poles"] = true}
 local combatSwappable = {[0] = true, [16] = true, [17] = true, [18] = true}
 local equipIDs, badItems, equipOrder, checkOnClear, lockedSlots = {}, {}, {}, {}, {}
-local isBankOpen, playerClass, queuedSet
+local isBankOpen, playerClass, equipQueued
 
 -- Bag0-3Slot
 
 function ItemSets:OnInitialize()
 	self.defaults = {
 		profile = {
+			queued = {},
 			sets = {}
 		},
 	}
@@ -36,12 +37,21 @@ function ItemSets:OnInitialize()
 	self:RegisterEvent("BANKFRAME_CLOSED", function() isBankOpen = nil end)
 	self:RegisterEvent("BANKFRAME_OPENED", function() isBankOpen = true end)
 	
+	-- Deal with set queues
+	self:RegisterEvent("PLAYER_REGEN_ENABLED", "CheckEquipQueue")
+	self:RegisterEvent("PLAYER_UNGHOST", "CheckEquipQueue")
+	
 	playerClass = select(2, UnitClass("player"))
 	
+	self.equipSlots = equipSlots
+	self.equipIDs = self.equipIDs
+	
 	-- Do name -> id for slots
-	for _, name in pairs(equipSlots) do
-		table.insert(equipIDs, (GetInventorySlotInfo(name)))
-		table.insert(equipOrder, (GetInventorySlotInfo(name)))
+	for name in pairs(equipSlots) do
+		local id = GetInventorySlotInfo(name)
+		
+		equipSlots[name] = id
+		table.insert(equipIDs, id)
 	end
 end
 
@@ -73,31 +83,59 @@ function ItemSets:IsSpecialGem(link)
 	return nil
 end
 
+-- Left combat, or we're alive, check queue
+local FEIGN_DEATH = GetSpellInfo(5384)
+function ItemSets:IsDead()
+	local id = 1
+	while( true ) do
+		local name = UnitBuff("player", id)
+		if( not name ) then break end
+		
+		if( name == FEIGN_DEATH ) then
+			return false
+		end
+		
+		id = id + 1
+	end
+	
+	return UnitIsDeadOrGhost("player")
+end
+
+function ItemSets:CheckEquipQueue()
+	-- Do we really need to check combat?
+	if( not self.db.profile.queued.active or InCombatLockdown() or self:IsDead() ) then
+		return
+	end
+	
+	-- Equip it
+	self:Equip(self.db.profile.queued)
+
+	-- Queued set complete, reset it
+	for k in pairs(self.db.profile.queued) do self.db.profile.queued[k] = nil end
+	self.modules.Character:ResetQueued()
+end
+
 -- NOTE: This will need to do a delay, due to the fact that trying to go from a 1H/Shield -> 2H won't work
 -- you have to unequip the Shield, then swap the 1H/2H.
 -- Check if we can swap the item in combat
 -- Check if it's in one slot but should be in another, eg, in ring #1 but needs to be in ring #2
-function ItemSets:Equip(name)
+function ItemSets:EquipByName(name)
 	local set = self.db.profile.sets[name]
 	if( not set ) then
 		self:Print(string.format(L["Cannot find any sets named \"%s\"."], name))
 		return
-	-- Remove this eventually, to just overwrite the old equip with the new (maybe?)
-	elseif( swapPending ) then
-		self:Print(string.format(L["Cannot equip set \"%s\", equip for set \"%s\" still pending"], name, swapPending))
-		return
 	end
 	
-	--swapPending = name
+	self:Equip(self.db.profile.sets[name])
+end
+
+function ItemSets:Equip(set)
 	self:ResetLocks()
 	
 	-- Check what the class can use
-	local hasTitansGrip, canUseOH
+	local hasTitansGrip
 	if( playerClass == "WARRIOR" ) then
-		canUseOH = true
 		hasTitansGrip = (select(5, GetTalentInfo(2, 26)) > 0)
-	elseif( playerClass == "ROGUE" or playerClass == "HUNTER" or playerClass == "DEATHKNIGHT" ) then
-		canUseOH = true
 	end
 	
 	-- Reset our equip order to default
@@ -110,12 +148,32 @@ function ItemSets:Equip(name)
 	end
 	
 	-- If we're in combat, only let us swap certain items (Ranged, MH, Ammo)
-	if( InCombatLockdown() ) then
+	local isDead = self:IsDead()
+	if( InCombatLockdown() or isDead ) then
+		for k in pairs(self.db.profile.queued) do self.db.profile.queued[k] = nil end
+		
 		for i=#(equipOrder), 1, -1 do
-			if( not combatSwappable[equipOrder[i]] ) then
+			local invID = equipOrder[i]
+			if( not combatSwappable[invID] or isDead ) then
+				
+				self.db.profile.queued[invID] = set[invID]
 				table.remove(equipOrder, i)
+				
+				-- If this set has an actual item thats supposed to be here, will set it to be equipped when combat drops
+				if( set[invID] ) then
+					self.db.profile.queued.active = true
+				end
 			end
 		end
+		
+		if( self.db.profile.queued.active ) then
+			self.modules.Character:EquipQueued()
+		end
+	end
+	
+	-- Nothing we can equip while in combat, or dead.
+	if( #(equipOrder) == 0 ) then
+		return
 	end
 	
 	-- Go through and do a quick check before running actual thingys
@@ -200,12 +258,10 @@ function ItemSets:Equip(name)
 			end
 		-- Couldn't find item in bags
 		elseif( link and link ~= "" ) then
-			print(inventoryID, link or "nil")
-			local validLink = select(2, GetItemInfo(string.format("item:%s", link)))
-			table.insert(badItems, validLink or "<bad link>")
+			table.insert(badItems, (select(2, GetItemInfo(link))) or "<bad link>")
 		end
 	end
-		
+			
 	-- Unable to equip some items
 	if( #(badItems) > 0 ) then
 		local items = table.concat(badItems, " ")
@@ -222,7 +278,7 @@ ItemSets.frame:Hide()
 ItemSets.frame:SetScript("OnUpdate", function(self, elapsed)
 	self.timeElapsed = self.timeElapsed + elapsed
 
-	if( self.timeElapsed >= 0.25 ) then
+	if( self.timeElapsed >= 0.50 ) then
 		ItemSets:ITEM_LOCK_CHANGED()
 
 		self.timeElapsed = 0
@@ -271,7 +327,7 @@ end
 -- Strips out the random junk from the link, all we want is the id/misc meta data
 function ItemSets:GetBaseData(link)
 	if( not link ) then return "" end
-	return string.match(link, "|Hitem:(.-)|h")
+	return string.match(link, "|H(.-)|h")
 end
 
 function ItemSets:IsContainer(bagID)
