@@ -10,10 +10,9 @@ local equipSlots = {["HeadSlot"] = -1, ["NeckSlot"] = -1, ["ShoulderSlot"] = -1,
 ["Finger1Slot"] = -1, ["Trinket0Slot"] = -1, ["Trinket1Slot"] = -1, ["SecondaryHandSlot"] = -1, ["MainHandSlot"] = -1, ["RangedSlot"] = -1, ["AmmoSlot"] = -1}
 local badTGWeaponType = {["Polearms"] = true, ["Staves"] = true, ["Fishing Poles"] = true}
 local combatSwappable = {[0] = true, [16] = true, [17] = true, [18] = true}
+local bankSlots = {11, 10, 9, 8, 7, 6, 5, -1}
 local equipIDs, badItems, equipOrder, checkOnClear, lockedSlots = {}, {}, {}, {}, {}
-local isBankOpen, playerClass, equipQueued
-
--- Bag0-3Slot
+local playerClass, equipQueued
 
 function ItemSets:OnInitialize()
 	self.defaults = {
@@ -34,8 +33,8 @@ function ItemSets:OnInitialize()
 	end)
 	
 	-- Don't rely on BankFrame in case they customized it
-	self:RegisterEvent("BANKFRAME_CLOSED", function() isBankOpen = nil end)
-	self:RegisterEvent("BANKFRAME_OPENED", function() isBankOpen = true end)
+	self:RegisterEvent("BANKFRAME_CLOSED", function() ItemSets.isBankOpen = nil end)
+	self:RegisterEvent("BANKFRAME_OPENED", function() ItemSets.isBankOpen = true end)
 	
 	-- Deal with set queues
 	self:RegisterEvent("PLAYER_REGEN_ENABLED", "CheckEquipQueue")
@@ -44,7 +43,8 @@ function ItemSets:OnInitialize()
 	playerClass = select(2, UnitClass("player"))
 	
 	self.equipSlots = equipSlots
-	self.equipIDs = self.equipIDs
+	self.equipIDs = equipIDs
+	self.bankSlots = bankSlots
 	
 	-- Do name -> id for slots
 	for name in pairs(equipSlots) do
@@ -57,7 +57,7 @@ end
 
 function ItemSets:IsSpecialGem(link)
 	if( not self.tooltip ) then
-		self.tooltip = CreateFrame("GameTooltip", "ItemSetsGemTooltip", UIParent, "GameTooltipTemplate")
+		self.tooltip = CreateFrame("GameTooltip", "ItemSetsScanTooltip", UIParent, "GameTooltipTemplate")
 		self.tooltip:SetOwner(UIParent, "ANCHOR_NONE")
 	end
 	
@@ -69,7 +69,7 @@ function ItemSets:IsSpecialGem(link)
 	end
 
 	-- Pre-WoTLK gems (Right now) we can only have one gem of this item link
-	local equipType = getglobal("ItemSetsGemTooltipTextLeft3"):GetText()
+	local equipType = getglobal("ItemSetsScanTooltipTextLeft3"):GetText()
 	if( equipType == L["Unique-Equipped"] ) then
 		return "unique", 1
 	end
@@ -108,11 +108,51 @@ function ItemSets:CheckEquipQueue()
 	end
 	
 	-- Equip it
-	self:Equip(self.db.profile.queued)
+	self:Equip(self.db.profile.queued, "Queued")
 
 	-- Queued set complete, reset it
 	for k in pairs(self.db.profile.queued) do self.db.profile.queued[k] = nil end
-	self.modules.Character:ResetQueued()
+	self.modules.Character:UpdateQueuedItems()
+end
+
+-- Equip a single item into a slot
+function ItemSets:EquipSingle(equipSlot, link)
+	local inventoryID = equipSlots[equipSlot]
+	
+	-- Make sure we can equip it right now
+	if( self:IsDead() or InCombatLockdown() ) then
+		-- If we don't have a queue active, reset it
+		if( not self.db.profile.queued.active ) then
+			for k in pairs(self.db.profile.queued) do self.db.profile.queued[k] = nil end
+		end
+		
+		-- Set it as queued
+		self.db.profile.queued.active = true
+		self.db.profile.queued[inventoryID] = link
+		
+		-- Update queued icon
+		self.modules.Character:UpdateQueuedItems()
+		return
+	end
+	
+	-- Unequipping
+	if( link == "" ) then
+		local freeBag, freeSlot = self:FindEmptyInventorySlot()
+		self:LockSlot(freeBag, freeSlot)
+		
+		PickupInventoryItem(inventoryID)
+		PickupContainerItem(freeBag, freeSlot)
+		return
+	end
+	
+	-- Equipping!
+	local bag, slot = self:FindItem(link)
+	if( not bag or not slot ) then
+		return
+	end
+	
+	PickupContainerItem(bag, slot)
+	PickupInventoryItem(inventoryID)
 end
 
 -- NOTE: This will need to do a delay, due to the fact that trying to go from a 1H/Shield -> 2H won't work
@@ -126,10 +166,10 @@ function ItemSets:EquipByName(name)
 		return
 	end
 	
-	self:Equip(self.db.profile.sets[name])
+	self:Equip(self.db.profile.sets[name], name)
 end
 
-function ItemSets:Equip(set)
+function ItemSets:Equip(set, name)
 	self:ResetLocks()
 	
 	-- Check what the class can use
@@ -167,7 +207,7 @@ function ItemSets:Equip(set)
 		end
 		
 		if( self.db.profile.queued.active ) then
-			self.modules.Character:EquipQueued()
+			self.modules.Character:UpdateQueuedItems()
 		end
 	end
 	
@@ -187,7 +227,7 @@ function ItemSets:Equip(set)
 			table.remove(equipOrder, i)
 		
 		-- Check if it has a prismatic gem, and we should unequip the item fully
-		elseif( inventoryLink ) then
+		elseif( inventoryLink and link and link ~= "" ) then
 			for i=1, 3 do
 				local gemLink = select(2, GetItemGem(inventoryLink, i))
 				if( gemLink and self:IsSpecialGem(gemLink) ) then
@@ -326,7 +366,7 @@ end
 
 -- Strips out the random junk from the link, all we want is the id/misc meta data
 function ItemSets:GetBaseData(link)
-	if( not link ) then return "" end
+	if( not link or link == "" ) then return "" end
 	return string.match(link, "|H(.-)|h")
 end
 
@@ -351,7 +391,7 @@ function ItemSets:FindItem(baseID)
 	end
 	
 	-- Can't find it, and bank is open so check there
-	if( isBankOpen ) then
+	if( self.isBankOpen ) then
 		for _, bag in pairs(bankSlots) do
 			if( self:IsContainer(bag) ) then
 				for slot=1, GetContainerNumSlots(bag) do
@@ -383,7 +423,6 @@ function ItemSets:FindEmptyInventorySlot()
 	return nil, nil
 end
 
-local bankSlots = {11, 10, 9, 8, 7, 6, 5, -1}
 function ItemSets:FindEmptyBankSlot()
 	for _, bag in pairs(bankSlots) do
 		if( self:IsContainer(bag)  ) then
