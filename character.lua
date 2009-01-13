@@ -180,14 +180,17 @@ function Character:FindItems(equipSlot, checkEquipped)
 	end
 	
 	-- Scan bank
-	if( self.isBankOpen ) then
+	if( ItemSets.isBankOpen ) then
 		for _, bag in pairs(ItemSets.bankSlots) do
 			if( ItemSets:IsContainer(bag) ) then
 				for slot=1, GetContainerNumSlots(bag) do
-					-- Can this be nil?
-					local weaponType = select(9, GetItemInfo(link))
-					if( ( ( not isTable and acceptable == weaponType ) or ( isTable and acceptable[weaponType] ) ) and self:IsWearable(bag, slot, equipSlot, weaponType) ) then
-						table.insert(itemList, link)
+					local link = GetContainerItemLink(bag, slot)
+					if( link ) then
+						-- Can this be nil?
+						local weaponType = select(9, GetItemInfo(link))
+						if( ( ( not isTable and acceptable == weaponType ) or ( isTable and acceptable[weaponType] ) ) and self:IsWearable(bag, slot, equipSlot, weaponType) ) then
+							table.insert(itemList, link)
+						end
 					end
 				end
 			end

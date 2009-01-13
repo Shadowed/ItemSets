@@ -27,7 +27,7 @@ local function showTooltip(self)
 	if( not self.itemLink or self.itemLink == "" ) then
 		return
 	end
-	
+		
 	-- Clean later... somehow
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	local bag, slot = ItemSets:FindItem(self.itemLink)
@@ -35,7 +35,7 @@ local function showTooltip(self)
 		GameTooltip:SetBagItem(bag, slot)
 	else
 		for _, inventoryID in pairs(ItemSets.equipSlots) do
-			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == baseLink ) then
+			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == self.itemLink ) then
 				GameTooltip:SetInventoryItem("player", inventoryID)
 				break
 			end
@@ -76,6 +76,10 @@ end
 -- Set management
 local function displaySet(name)
 	local set = ItemSets.db.profile.sets[name]
+
+	Config.frame.setFrame.showHelm:SetChecked(set.helm)
+	Config.frame.setFrame.showCloak:SetChecked(set.cloak)
+
 	for slot, inventoryID in pairs(ItemSets.equipSlots) do
 		local button = equipButtons[slot]
 		if( button ) then
@@ -114,6 +118,7 @@ local function selectSet(self)
 	Config.frame.setFrame.deleteSet:Disable()
 	Config.frame.setFrame.showHelm:Disable()
 	Config.frame.setFrame.showCloak:Disable()
+	Config.frame.setFrame.setName:GetScript("OnEditFocusLost")(Config.frame.setFrame.setName)
 
 	for _, row in pairs(Config.frame.setFrame.rows) do
 		if( row.name == lockedSet ) then
@@ -121,6 +126,8 @@ local function selectSet(self)
 			Config.frame.setFrame.deleteSet:Enable()
 			Config.frame.setFrame.showHelm:Enable()
 			Config.frame.setFrame.showCloak:Enable()
+			Config.frame.setFrame.setName:GetScript("OnEditFocusGained")(Config.frame.setFrame.setName)
+			Config.frame.setFrame.setName:SetText(self.name)
 
 			row:LockHighlight()
 			displaySet(self.name)
@@ -152,11 +159,18 @@ local function deleteLockedSet(self)
 end
 
 local function createNewSet(self)
-	self.name = self:GetText()
+	self.name = string.trim(self:GetText() or "")
 	self:SetText("")
 	self:ClearFocus()
+	
+	if( self.name == "" ) then
+		return	
+	elseif( ItemSets.db.profile.sets[self.name] ) then
+		ItemSets:Print(string.format(L["Cannot create set named \"%s\" one already exists with that name."], self.name))
+		return
+	end
 
-	ItemSets.db.profile.sets[self.name] = {}
+	ItemSets.db.profile.sets[self.name] = {helm = true, cloak = true}
 	Config:UpdateSetRows()
 	
 	selectSet(self)
@@ -211,7 +225,7 @@ function Config:UpdateSetRows()
 			row.push:SetScript("OnClick", pushSet)
 			row.push:SetScript("OnEnter", showTextTooltip)
 			row.push:SetScript("OnLeave", hideTooltip)
-			row.push.tooltip = L["Pushs all the items from this set into your bank, from your inventory."]
+			row.push.tooltip = L["Pushes all the items from this set into your bank, from your inventory."]
 
 			row.pull = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
 			row.pull:SetText("Pull")
@@ -257,7 +271,7 @@ function Config:Open()
 		tileSize = 5,
 		insets = {left = 1, right = 1, top = 1, bottom = 1}}
 
-	local frame = CreateFrame("Frame", nil, UIParent)
+	local frame = CreateFrame("Frame", "ItemSetsOptions", UIParent)
 	frame:SetWidth(260)
 	frame:SetHeight(330)
 	frame:SetToplevel(true)
@@ -266,8 +280,78 @@ function Config:Open()
 	frame:SetBackdropColor(0.0, 0.0, 0.0, 1.0)
 	frame:SetBackdropBorderColor(0.65, 0.65, 0.65, 1.0)
 	frame:SetClampedToScreen(true)
+	frame:SetMovable(true)
 	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 	self.frame = frame
+	
+	if( ItemSets.db.profile.position ) then
+		local scale = frame:GetEffectiveScale()
+
+		frame:ClearAllPoints()
+		frame:SetPoint("TOPLEFT", nil, "BOTTOMLEFT", ItemSets.db.profile.position.x / scale, ItemSets.db.profile.position.y / scale)
+	end
+	
+	-- Title bar
+	local titleFrame = CreateFrame("Frame", nil, frame)
+	titleFrame:SetWidth(260)
+	titleFrame:SetHeight(18)
+	titleFrame:SetToplevel(true)
+	titleFrame:SetFrameStrata("HIGH")
+	titleFrame:SetBackdrop(infoBackdrop)
+	titleFrame:SetBackdropColor(0.0, 0.0, 0.0, 1.0)
+	titleFrame:SetBackdropBorderColor(0.65, 0.65, 0.65, 1.0)
+	titleFrame:SetClampedToScreen(true)
+	titleFrame:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, 4)
+
+	titleFrame.button = CreateFrame("Button", nil, titleFrame)
+	titleFrame.button:SetHeight(18)
+	titleFrame.button:SetWidth(240)
+	titleFrame.button:SetPushedTextOffset(0, 0)
+	titleFrame.button:SetNormalFontObject(GameFontHighlight)
+	titleFrame.button:SetText(L["Item Sets"])
+	titleFrame.button:GetFontString():SetPoint("CENTER", titleFrame.button, "CENTER", 10, 0)
+	titleFrame.button:SetPoint("TOPLEFT", titleFrame, "TOPLEFT", 0, 0)
+	titleFrame.button:SetScript("OnMouseUp", function(self)
+		if( self.isMoving ) then
+			local parent = ItemSetsOptions
+			local scale = parent:GetEffectiveScale()
+
+			self.isMoving = nil
+			parent:StopMovingOrSizing()
+
+			ItemSets.db.profile.position = {x = parent:GetLeft() * scale, y = parent:GetTop() * scale}
+		end
+	end)
+
+	titleFrame.button:SetScript("OnMouseDown", function(self, mouse)
+		local parent = ItemSetsOptions
+
+		-- Start moving!
+		if( parent:IsMovable() and mouse == "LeftButton" ) then
+			self.isMoving = true
+			parent:StartMoving()
+
+		-- Reset position
+		elseif( mouse == "RightButton" ) then
+			parent:ClearAllPoints()
+			parent:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+			ItemSets.db.profile.position = nil
+		end
+	end)
+
+	titleFrame.close = CreateFrame("Button", nil, titleFrame, "UIPanelCloseButton")
+	titleFrame.close:SetHeight(26)
+	titleFrame.close:SetWidth(26)
+	titleFrame.close:SetPoint("TOPRIGHT", 4, 4)
+	titleFrame.close:SetScript("OnClick", function()
+		HideUIPanel(ItemSetsOptions)
+	end)
+	
+	self.frame.titleFrame = titleFrame
+	
+	-- Special!
+	table.insert(UISpecialFrames, "ItemSetsOptions")
 
 	local leftSide = {"HeadSlot", "NeckSlot", "ShoulderSlot", "BackSlot", "ChestSlot", "ShirtSlot", "TabardSlot", "WristSlot"}
 	local rightSide = {"HandsSlot", "WaistSlot", "LegsSlot", "FeetSlot", "Finger0Slot", "Finger1Slot", "Trinket0Slot", "Trinket1Slot"}
@@ -432,9 +516,19 @@ SlashCmdList["ITEMSETS"] = function(msg)
 	local cmd, arg = string.split(" ", msg, 2)
 	cmd = string.lower(cmd or "")
 
-	if( cmd == "equip" ) then
-		ItemSets:EquipByName(arg)
-	else
+	if( cmd == "equip" and arg ) then
+		self:EquipByName(arg)
+	elseif( cmd == "push" and arg ) then
+		self:PushSet(arg)
+	elseif( cmd == "pull" and arg ) then
+		self:PullSet(arg)
+	elseif( cmd == "ui" or cmd == "config" or cmd == "opt" ) then
 		Config:Open()
+	else
+		self:Print(L["Slash commands"])
+		self:Echo(L["/itemsets equip <name> - Equips a set by name."])
+		self:Echo(L["/itemsets push <name> - Pushes a set from your inventory to your bank."])
+		self:Echo(L["/itemsets pull <name> - Pulls a set from your bank to your inventory."])
+		self:Echo(L["/itemsets ui - Opens the set interface."])
 	end
 end

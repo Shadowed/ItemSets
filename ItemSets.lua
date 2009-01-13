@@ -55,6 +55,136 @@ function ItemSets:OnInitialize()
 	end
 end
 
+-- Put a set from your inventory, into your bank
+function ItemSets:PushSet(name)
+	if( not self.isBankOpen ) then
+		self:Print("Your bank must be open to perform this action.")
+		return
+	end
+	
+	local set = self.db.profile.sets[name]
+	if( not set ) then
+		self:Print(string.format(L["Cannot find any sets named \"%s\"."], name))
+		return
+	end
+	
+	-- Quick check, make sure we have enough free space
+	local totalItems = 0
+	for _, link in pairs(set) do
+		local bag, slot, location = self:FindItem(link)
+		if( ( bag and slot and location == "inventory" ) or IsEquippedItem(link) ) then
+			totalItems = totalItems + 1
+		end
+	end
+	
+	-- Figure out how much space we have in our bank
+	local freeSlots = 0
+	for _, bag in pairs(bankSlots) do
+		if( self:IsContainer(bag) ) then
+			freeSlots = freeSlots + (GetContainerNumFreeSlots(bag))	
+		end
+	end
+	
+	-- Nope! :(
+	if( totalItems == 0 ) then
+		self:Print(string.format(L["Cannot push set \"%s\" from bank, nothing in there to get."], name))
+		return
+	elseif( freeSlots < totalItems ) then
+		self:Print(string.format(L["Cannot perform push on set \"%s\", requires %d slots open, you only have %d available in your bank."], name, totalItems, freeSlots))
+		return
+	end
+	
+	-- Start pushing
+	self:ResetLocks()
+
+	for _, link in pairs(set) do
+		if( IsEquippedItem(link) ) then
+			for _, inventoryID in pairs(equipSlots) do
+				if( self:GetBaseData(GetInventoryItemLink("player", inventoryID)) == link ) then
+					local freeBag, freeSlot = self:FindEmptyBankSlot()
+					self:LockSlot(freeBag, freeSlot)
+					
+					PickupInventoryItem(inventoryID)
+					PickupContainerItem(freeBag, freeSlot)
+					break
+				end
+			end
+		else
+			local bag, slot, location = self:FindItem(link)
+			if( bag and slot and location == "inventory" ) then
+				local freeBag, freeSlot = self:FindEmptyBankSlot()
+				
+				self:UnlockSlot(bag, slot)
+				self:LockSlot(freeBag, freeSlot)
+
+				PickupContainerItem(bag, slot)
+				PickupContainerItem(freeBag, freeSlot)
+			end
+		end
+	end
+	
+	self:Print(string.format(L["Pushed set \"%s\" into your bank."], name))
+end
+-- Bring a set from your bank, into your inventory
+function ItemSets:PullSet(name)
+	if( not self.isBankOpen ) then
+		self:Print("Your bank must be open to perform this action.")
+		return
+	end
+	
+	local set = self.db.profile.sets[name]
+	if( not set ) then
+		self:Print(string.format(L["Cannot find any sets named \"%s\"."], name))
+		return
+	end
+	
+	-- Quick check, make sure we have enough free space
+	local totalItems = 0
+	for _, link in pairs(set) do
+		
+		local bag, slot, location = self:FindItem(link)
+		if( bag and slot and location == "bank" ) then
+			totalItems = totalItems + 1
+		end
+	end
+	
+	-- Figure out how much space we have in our bank
+	local freeSlots = 0
+	for bag=4, 0, -1 do
+		if( self:IsContainer(bag) ) then
+			freeSlots = freeSlots + (GetContainerNumFreeSlots(bag))
+		end
+	end
+	
+	-- Nope! :(
+	if( totalItems == 0 ) then
+		self:Print(string.format(L["Cannot pull set \"%s\" from bank, nothing in there to get."], name))
+		return
+	elseif( freeSlots < totalItems ) then
+		self:Print(string.format(L["Cannot perform pull on set \"%s\", requires %d slots open, you only have %d available in your inventory."], name, totalItems, freeSlots))
+		return
+	end
+	
+	-- Start pulling
+	self:ResetLocks()
+
+	for _, link in pairs(set) do
+		local bag, slot, location = self:FindItem(link)
+		if( bag and slot and location == "bank" ) then
+			local freeBag, freeSlot = self:FindEmptyInventorySlot()
+			
+			self:UnlockSlot(bag, slot)
+			self:LockSlot(freeBag, freeSlot)
+
+			PickupContainerItem(bag, slot)
+			PickupContainerItem(freeBag, freeSlot)
+		end
+	end
+
+	self:Print(string.format(L["Pulled set \"%s\" into your inventory."], name))
+end
+
+-- Any sort of unique gem in this link?
 function ItemSets:IsSpecialGem(link)
 	if( not self.tooltip ) then
 		self.tooltip = CreateFrame("GameTooltip", "ItemSetsScanTooltip", UIParent, "GameTooltipTemplate")
@@ -378,12 +508,12 @@ function ItemSets:GetBaseData(link)
 end
 
 function ItemSets:IsContainer(bagID)
-	return bagID == 0 or bagID == -1 or GetItemFamily(GetInventoryItemLink("player", bagID)) == 0
+	return bagID == 0 or bagID == -1 or GetItemFamily(GetInventoryItemLink("player", ContainerIDToInventoryID(bagID))) == 0
 end
 
 -- Find an item
 function ItemSets:FindItem(baseID)
-	if( not baseID or baseID == "" ) then
+	if( type(baseID) ~= "string" or baseID == "" ) then
 		return nil, nil, nil
 	end
 	
@@ -464,24 +594,10 @@ function ItemSets:ResetLocks()
 	end
 end
 
--- Debug
-function ItemSets:Save(name)
-	local set = self.db.profile.sets[name] or {}
-	for id in pairs(set) do set[id] = nil end
-	
-	for _, id in pairs(equipIDs) do
-		local link = GetInventoryItemLink("player", id)
-		if( link ) then
-			set[id] = self:GetBaseData(link)
-		else
-			set[id] = ""
-		end
-	end
-	
-	
-	self.db.profile.sets[name] = set
-end
-
 function ItemSets:Print(msg)
 	DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99ItemSets|r: " .. msg)
+end
+
+function ItemSets:Echo(msg)
+	DEFAULT_CHAT_FRAME:AddMessage(msg)
 end
