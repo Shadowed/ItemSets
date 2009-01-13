@@ -18,6 +18,8 @@ local function fakeEquip(self)
 	local button = equipButtons[self.equipSlot]
 	button.itemLink = ItemSets:GetBaseData(self.itemLink)
 	button.texture:SetTexture(icon)
+	button.isEnabled = true
+	button.texture:SetAlpha(1.0)
 end
 
 local function showTooltip(self)
@@ -171,6 +173,10 @@ local function createNewSet(self)
 	end
 
 	ItemSets.db.profile.sets[self.name] = {helm = true, cloak = true}
+	for slot in pairs(ItemSets.equipSlots) do
+		ItemSets.db.profile.sets[self.name][slot] = ""
+	end
+	
 	Config:UpdateSetRows()
 	
 	selectSet(self)
