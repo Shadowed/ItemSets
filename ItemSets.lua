@@ -24,7 +24,7 @@ function ItemSets:OnInitialize()
 
 	self.db = LibStub:GetLibrary("AceDB-3.0"):New("ItemSetsDB", self.defaults)
 	
-	-- Only call ITEM_LOCK_CHANGED every 0.25 seconds
+	-- Throttle ITEM_LOCK_CHANGED calls
 	self:RegisterEvent("ITEM_LOCK_CHANGED", function()
 		if( checkLock ) then
 			ItemSets.timeElapsed = 0
@@ -207,6 +207,9 @@ function ItemSets:Equip(set, name)
 		end
 		
 		if( self.db.profile.queued.active ) then
+			self.db.profile.queued.helm = set.helm
+			self.db.proifle.queued.cloak = set.cloak
+		
 			self.modules.Character:UpdateQueuedItems()
 		end
 	end
@@ -301,6 +304,10 @@ function ItemSets:Equip(set, name)
 			table.insert(badItems, (select(2, GetItemInfo(link))) or "<bad link>")
 		end
 	end
+	
+	-- Helm/Cloak shows
+	ShowHelm(set.helm)
+	ShowCloak(set.cloak)
 			
 	-- Unable to equip some items
 	if( #(badItems) > 0 ) then

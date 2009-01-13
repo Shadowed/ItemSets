@@ -7,4 +7,19 @@ ItemSetLocals = {
 	-- Gem types
 	["Unique-Equipped"] = "Unique-Equipped",
 	["Unique Equipped: (.+) %(([0-9]+)%)"] = "Unique Equipped: (.+) %(([0-9]+)%)",
+	
+	-- Configuration
+	["Delete"] = "Delete",
+	["Save"] = "Save",
+	["Helm"] = "Helm",
+	["Cloak"] = "Cloak",
+
+	["Show Helm"] = "Show Helm",
+	["Show Cloak"] = "Show Cloak",
+	
+	["Push"] = "Push",
+	["Pull"] = "Pull",
+	
+	["Pulls all the items from this set into your inventory, from your bank."] = "Pulls all the items from this set into your inventory, from your bank.",
+	["Pushs all the items from this set into your bank, from your inventory."] = "Pushs all the items from this set into your bank, from your inventory.",
 }

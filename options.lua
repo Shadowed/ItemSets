@@ -1,6 +1,426 @@
 local Config = ItemSets:NewModule("Config")
+local Character, lockedSet
+local equipButtons = {}
+local directions = {["AmmoSlot"] = "DOWN", ["MainHandSlot"] = "DOWN", ["SecondaryHandSlot"] = "DOWN", ["RangedSlot"] = "DOWN",
+["HeadSlot"] = "LEFT", ["NeckSlot"] = "LEFT", ["ShoulderSlot"] = "LEFT", ["ShirtSlot"] = "LEFT", ["ChestSlot"] = "LEFT", ["WristSlot"] = "LEFT", ["BackSlot"] = "LEFT", ["TabardSlot"] = "LEFT",
+["WaistSlot"] = "RIGHT", ["LegsSlot"] = "RIGHT", ["FeetSlot"] = "RIGHT", ["HandsSlot"] = "RIGHT", ["Finger0Slot"] = "RIGHT", ["Finger1Slot"] = "RIGHT", ["Trinket0Slot"] = "RIGHT", ["Trinket1Slot"] = "RIGHT"}
 
+local L = ItemSetLocals
 
+function Config:OnInitialize()
+	Character = ItemSets.modules.Character
+end
+
+local function fakeEquip(self)
+	Character:HideMenu()
+	
+	local icon = select(10, GetItemInfo(self.itemLink)) or Character:GetBackgroundTexture(self.equipSlot)
+	local button = equipButtons[self.equipSlot]
+	button.itemLink = ItemSets:GetBaseData(self.itemLink)
+	button.texture:SetTexture(icon)
+end
+
+local function showTooltip(self)
+	-- Create menu if needed
+	Character:CreateMenu(self.equipSlot, self, directions[self.equipSlot], fakeEquip, true)
+	
+	if( not self.itemLink or self.itemLink == "" ) then
+		return
+	end
+	
+	-- Clean later... somehow
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	local bag, slot = ItemSets:FindItem(self.itemLink)
+	if( bag and slot ) then
+		GameTooltip:SetBagItem(bag, slot)
+	else
+		for _, inventoryID in pairs(ItemSets.equipSlots) do
+			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == baseLink ) then
+				GameTooltip:SetInventoryItem("player", inventoryID)
+				break
+			end
+		end
+	end
+	
+	GameTooltip:Show()
+end
+
+local function hideTooltip(self)
+	Character:ResetMouseTimeout()
+	GameTooltip:Hide()
+end
+
+local function toggleEnabled(self)
+	self.isEnabled = not self.isEnabled
+	self.texture:SetAlpha(self.isEnabled and 1.0 or 0.25)
+end
+
+-- Create slot button
+function Config:CreateButton(slot)
+	local button = CreateFrame("Button", "ItemSetsOptionsButton" .. slot, self.frame, "ItemButtonTemplate")
+	button.texture = getglobal(button:GetName() .. "IconTexture")
+	button.equipSlot = slot
+	button.itemLink = ""
+	button.isEnabled = true
+	
+	button.texture:SetTexture(Character:GetBackgroundTexture(slot))
+	button:SetScript("OnEnter", showTooltip)
+	button:SetScript("OnLeave", hideTooltip)
+	button:SetScript("OnClick", toggleEnabled)
+	button:RegisterForClicks("LeftButtonUp")
+	
+	equipButtons[slot] = button
+	return button
+end
+
+-- Set management
+local function displaySet(name)
+	local set = ItemSets.db.profile.sets[name]
+	for slot, inventoryID in pairs(ItemSets.equipSlots) do
+		local button = equipButtons[slot]
+		if( button ) then
+			local link = set[inventoryID]
+			local icon = Character:GetBackgroundTexture(slot)
+
+			-- Not managing this slot
+			if( not link ) then
+				button.isEnabled = false
+				button.texture:SetAlpha(0.25)
+			elseif( link ~= "" ) then
+				button.isEnabled = true
+				button.texture:SetAlpha(1.0)
+				
+				icon = select(10, GetItemInfo(link)) or icon
+			end
+
+			button.itemLink = link
+			button.texture:SetTexture(icon)
+		end
+	end
+end
+
+local function previewSet(self)
+	if( not lockedSet ) then
+		displaySet(self.name)
+	end
+end
+
+local function selectSet(self)
+	-- Newly locked, or unlocking?
+	lockedSet = lockedSet ~= self.name and self.name or nil
+
+	-- Reset status
+	Config.frame.setFrame.saveSet:Disable()
+	Config.frame.setFrame.deleteSet:Disable()
+	Config.frame.setFrame.showHelm:Disable()
+	Config.frame.setFrame.showCloak:Disable()
+
+	for _, row in pairs(Config.frame.setFrame.rows) do
+		if( row.name == lockedSet ) then
+			Config.frame.setFrame.saveSet:Enable()
+			Config.frame.setFrame.deleteSet:Enable()
+			Config.frame.setFrame.showHelm:Enable()
+			Config.frame.setFrame.showCloak:Enable()
+
+			row:LockHighlight()
+			displaySet(self.name)
+		else
+			row:UnlockHighlight()
+		end
+	end
+end
+
+local function saveLockedSet(self)
+	local setFrame = Config.frame.setFrame
+	
+	-- Save helm/cloak visibility
+	ItemSets.db.profile.sets[lockedSet].helm = setFrame.showHelm:GetChecked() and true or false
+	ItemSets.db.profile.sets[lockedSet].cloak = setFrame.showCloak:GetChecked() and true or false
+	
+	-- Save items
+	for slot, button in pairs(equipButtons) do
+		ItemSets.db.profile.sets[lockedSet][ItemSets.equipSlots[slot]] = button.isEnabled and button.itemLink or nil
+	end
+end
+
+local function deleteLockedSet(self)
+	ItemSets.db.profile.sets[lockedSet] = nil
+	Config:UpdateSetRows()
+
+	lockedSet = nil
+	selectSet(self)
+end
+
+local function createNewSet(self)
+	self.name = self:GetText()
+	self:SetText("")
+	self:ClearFocus()
+
+	ItemSets.db.profile.sets[self.name] = {}
+	Config:UpdateSetRows()
+	
+	selectSet(self)
+end
+
+-- Push/pulling
+local function pushSet(self)
+	ItemSets:PushSet(self:GetParent().name)
+end
+
+local function pullSet(self)
+	ItemSets:PullSet(self:GetParent().name)
+end
+
+local function showTextTooltip(self)
+	if( not self.tooltip ) then
+		return
+	end
+	
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:AddLine(self.tooltip, 1.0, 1.0, 1.0, true)
+	GameTooltip:Show()
+end
+
+-- Update set rows
+function Config:UpdateSetRows()
+	for _, button in pairs(self.frame.setFrame.rows) do
+		button:Hide()
+	end
+
+	local usedRows = 0
+	for name, items in pairs(ItemSets.db.profile.sets) do
+		usedRows = usedRows + 1
+
+		local row = self.frame.setFrame.rows[usedRows]
+		if( not row ) then
+			row = CreateFrame("Button", nil, self.frame.setFrame)
+			row:SetHeight(15)
+			row:SetWidth(102)
+			row:SetHighlightFontObject(GameFontNormal)
+			row:SetNormalFontObject(GameFontHighlight)
+			row:SetScript("OnEnter", previewSet)
+			row:SetScript("OnClick", selectSet)
+			row:SetText("*")
+			row:GetFontString():SetPoint("TOPLEFT", row)
+
+			row.push = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
+			row.push:SetText("Push")
+			row.push:SetPoint("TOPRIGHT", row, "TOPRIGHT", 31, 0)
+			row.push:SetHeight(15)
+			row.push:SetWidth(34)
+			row.push:SetScript("OnClick", pushSet)
+			row.push:SetScript("OnEnter", showTextTooltip)
+			row.push:SetScript("OnLeave", hideTooltip)
+			row.push.tooltip = L["Pushs all the items from this set into your bank, from your inventory."]
+
+			row.pull = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
+			row.pull:SetText("Pull")
+			row.pull:SetPoint("TOPLEFT", row.push, "TOPRIGHT", 0, 0)
+			row.pull:SetHeight(15)
+			row.pull:SetWidth(34)
+			row.pull:SetScript("OnClick", pullSet)
+			row.pull:SetScript("OnEnter", showTextTooltip)
+			row.pull:SetScript("OnLeave", hideTooltip)
+			row.pull.tooltip = L["Pulls all the items from this set into your inventory, from your bank."]
+
+			if( usedRows > 1 ) then
+				row:SetPoint("TOPLEFT", self.frame.setFrame.rows[usedRows - 1], "BOTTOMLEFT", 1, -7)
+			else
+				row:SetPoint("TOPLEFT", self.frame.setFrame, "TOPLEFT", 1, -1)
+			end
+			
+			self.frame.setFrame.rows[usedRows] = row
+		end
+		
+		row.name = name
+		row:SetText(name)
+		row:Show()
+	end
+end
+
+-- Create configuration
+function Config:Open()
+	if( self.frame ) then 
+		if( self.frame:IsVisible() ) then
+			self.frame:Hide()
+		else
+			self.frame:Show()
+		end
+		return 
+	end
+
+	local infoBackdrop = {  
+		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+		tile = true,
+		edgeSize = 1,
+		tileSize = 5,
+		insets = {left = 1, right = 1, top = 1, bottom = 1}}
+
+	local frame = CreateFrame("Frame", nil, UIParent)
+	frame:SetWidth(260)
+	frame:SetHeight(330)
+	frame:SetToplevel(true)
+	frame:SetFrameStrata("HIGH")
+	frame:SetBackdrop(infoBackdrop)
+	frame:SetBackdropColor(0.0, 0.0, 0.0, 1.0)
+	frame:SetBackdropBorderColor(0.65, 0.65, 0.65, 1.0)
+	frame:SetClampedToScreen(true)
+	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	self.frame = frame
+
+	local leftSide = {"HeadSlot", "NeckSlot", "ShoulderSlot", "BackSlot", "ChestSlot", "ShirtSlot", "TabardSlot", "WristSlot"}
+	local rightSide = {"HandsSlot", "WaistSlot", "LegsSlot", "FeetSlot", "Finger0Slot", "Finger1Slot", "Trinket0Slot", "Trinket1Slot"}
+	local bottomSide = {"MainHandSlot", "SecondaryHandSlot", "RangedSlot"}
+	
+	-- Add the ammo slot if they don't have a relic
+	local bottomOffset = 72
+	if( not UnitHasRelicSlot("player") ) then
+		bottomOffset = 58
+		table.insert(bottomSide, "AmmoSlot")
+	end
+	
+	-- Create the left side
+	local lastButton
+	for id, slot in pairs(leftSide) do
+		local button = self:CreateButton(slot)
+		if( id > 1 ) then
+			button:SetPoint("TOPLEFT",  lastButton, "BOTTOMLEFT", 0, -4)
+		else
+			button:SetPoint("TOPLEFT", frame, "TOPLEFT", 3, -2)
+		end
+
+		lastButton = button
+	end
+
+	-- Now the right
+	for id, slot in pairs(rightSide) do
+		local button = self:CreateButton(slot)
+		if( id > 1 ) then
+			button:SetPoint("TOPLEFT",  lastButton, "BOTTOMLEFT", 0, -4)
+		else
+			button:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -2, -2)
+		end
+
+		lastButton = button
+	end
+
+	-- Now the bottom middle
+	for id, slot in pairs(bottomSide) do
+		local button = self:CreateButton(slot)
+		if( id > 1 ) then
+			button:SetPoint("TOPLEFT",  lastButton, "TOPRIGHT", 4, 0)
+		else
+			button:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", bottomOffset, 4)
+		end
+
+		lastButton = button
+	end
+	
+	-- Make the ammo button all pretty looking
+	local ammoButton = equipButtons.AmmoSlot
+	if( ammoButton ) then
+		local ammoButton = ItemSetsOptionsButtonAmmoSlot
+		ammoButton.border = ItemSetsOptionsButtonAmmoSlotNormalTexture
+
+		ammoButton.border:SetWidth(42)
+		ammoButton.border:SetHeight(42)
+		ammoButton:SetHeight(24)
+		ammoButton:SetWidth(24)
+
+		ammoButton:ClearAllPoints()
+		ammoButton:SetPoint("TOPLEFT", equipButtons.RangedSlot, "TOPRIGHT", 4, -7)
+	end
+	
+	-- Create the set selecter
+	frame.setFrame = CreateFrame("Frame", nil, frame)
+	frame.setFrame:SetWidth(170)
+	frame.setFrame:SetHeight(280)
+	frame.setFrame:SetBackdrop(infoBackdrop)
+	frame.setFrame:SetBackdropColor(0.0, 0.0, 0.0, 1.0)
+	frame.setFrame:SetBackdropBorderColor(0.65, 0.65, 0.65, 1.0)
+	frame.setFrame:SetClampedToScreen(true)
+	frame.setFrame:SetPoint("CENTER", frame, "CENTER", 0, 20)
+	frame.setFrame.rows = {}
+
+	self:UpdateSetRows()
+	
+	-- Save/Delete/Show Cloak/Show Helm
+	local saveSet = CreateFrame("Button", nil, frame.setFrame, "UIPanelButtonGrayTemplate")
+	saveSet:SetText(L["Save"])
+	saveSet:SetHeight(24)
+	saveSet:SetWidth(50)
+	saveSet:SetPoint("BOTTOMRIGHT", frame.setFrame, "BOTTOMRIGHT", -1, 2)
+	saveSet:SetScript("OnClick", saveLockedSet)
+	saveSet:Disable()
+
+	frame.setFrame.saveSet = saveSet
+	
+	local deleteSet = CreateFrame("Button", nil, frame.setFrame, "UIPanelButtonGrayTemplate")
+	deleteSet:SetText(L["Delete"])
+	deleteSet:SetHeight(24)
+	deleteSet:SetWidth(50)
+	deleteSet:SetPoint("BOTTOMRIGHT", saveSet, "BOTTOMLEFT", 0, 0)
+	deleteSet:SetScript("OnClick", deleteLockedSet)
+	deleteSet:Disable()
+	
+	frame.setFrame.deleteSet = deleteSet
+
+	local showHelm = CreateFrame("CheckButton", nil, frame.setFrame, "OptionsCheckButtonTemplate")
+	showHelm:SetHeight(18)
+	showHelm:SetWidth(18)
+	showHelm:SetChecked(true)
+	showHelm:SetPoint("BOTTOMLEFT", frame.setFrame, "BOTTOMLEFT", 0, 10)
+	showHelm:SetScript("OnEnter", showTextTooltip)
+	showHelm:SetScript("OnLeave", hideTooltip)
+	showHelm:Disable()
+	showHelm.tooltip = L["Show Helm"]
+
+	showHelm.text = showHelm:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	showHelm.text:SetText(L["Helm"])
+	showHelm.text:SetPoint("TOPLEFT", showHelm, "TOPRIGHT", -1, -3)
+	
+	frame.setFrame.showHelm = showHelm
+
+	local showCloak = CreateFrame("CheckButton", nil, frame.setFrame, "OptionsCheckButtonTemplate")
+	showCloak:SetHeight(18)
+	showCloak:SetWidth(18)
+	showCloak:SetChecked(true)
+	showCloak:SetPoint("BOTTOMLEFT", frame.setFrame, "BOTTOMLEFT", 0, -2)
+	showCloak:SetScript("OnEnter", showTextTooltip)
+	showCloak:SetScript("OnLeave", hideTooltip)
+	showCloak:Disable()
+	showCloak.tooltip = L["Show Cloak"]
+
+	showCloak.text = showCloak:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	showCloak.text:SetText(L["Cloak"])
+	showCloak.text:SetPoint("TOPLEFT", showCloak, "TOPRIGHT", -1, -3)
+	
+	frame.setFrame.showCloak = showCloak
+	
+	-- Create new set
+	local setName = CreateFrame("EditBox", "ItemSetsNewSetInput", frame.setFrame, "InputBoxTemplate")
+	setName:SetHeight(19)
+	setName:SetWidth(162)
+	setName:SetAutoFocus(false)
+	setName:ClearAllPoints()
+	setName:SetPoint("BOTTOMLEFT", frame.setFrame, "BOTTOMLEFT", 6, 30)
+	setName:SetScript("OnEnterPressed", createNewSet)
+	setName:SetScript("OnEditFocusGained", function(self)
+		self:SetText("")
+		self:SetTextColor(1, 1, 1, 1)   
+	end)
+
+	setName:SetScript("OnEditFocusLost", function(self)
+		if( string.trim(self:GetText()) == "" ) then
+			self:SetText("New set name...")
+			self:SetTextColor(0.90, 0.90, 0.90, 0.80)
+		end
+	end)
+	setName:GetScript("OnEditFocusLost")(setName)
+	
+	frame.setFrame.setName = setName
+end
 
 SLASH_ITEMSETS1 = "/is"
 SLASH_ITEMSETS2 = "/itemsets"
@@ -14,5 +434,7 @@ SlashCmdList["ITEMSETS"] = function(msg)
 
 	if( cmd == "equip" ) then
 		ItemSets:EquipByName(arg)
+	else
+		Config:Open()
 	end
 end

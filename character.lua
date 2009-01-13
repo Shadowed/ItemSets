@@ -53,12 +53,17 @@ function Character:OnInitialize()
 	durabilityPattern = string.gsub(DURABILITY_TEMPLATE, "%%d", "([0-9]+)")
 	
 	-- Setup menu to work with the character screen
+	local function equipItem(self)
+		Character:HideMenu()
+		ItemSets:EquipSingle(self.equipSlot, ItemSets:GetBaseData(self.itemLink))
+	end
+
 	local function onEnter(self, ...)
 		if( self.ISOnEnter ) then
 			self.ISOnEnter(self, ...)
 		end
 		
-		Character:CreateMenu(self.ISSlot, self, directions[self.ISSlot])
+		Character:CreateMenu(self.ISSlot, self, directions[self.ISSlot], equipItem)
 	end
 	
 	local function onLeave(self, ...)
@@ -66,9 +71,9 @@ function Character:OnInitialize()
 			self.ISOnLeave(self, ...)
 		end
 		
-		mouseTimeout = MOUSE_TIMEOUT
+		Character:ResetMouseTimeout()
 	end
-	
+
 	for slot, invID in pairs(ItemSets.equipSlots) do
 		local frame = getglobal("Character" .. slot)
 		frame.ISOnEnter = frame:GetScript("OnEnter")
@@ -151,7 +156,7 @@ function Character:CheckEquipSkill()
 	end
 end
 
-function Character:FindItems(equipSlot)
+function Character:FindItems(equipSlot, checkEquipped)
 	self:CheckEquipSkill()
 	
 	for i=#(itemList), 1, -1 do table.remove(itemList, i) end
@@ -189,6 +194,35 @@ function Character:FindItems(equipSlot)
 		end
 	end
 	
+	-- Scan equipped items
+	if( checkEquipped ) then
+		-- Make less ugly later
+		if( equipSlot == "Finger0Slot" or equipSlot == "Finger1Slot" ) then
+			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Finger0Slot)
+			if( link ) then
+				table.insert(itemList, link)
+			end
+			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Finger1Slot)
+			if( link ) then
+				table.insert(itemList, link)
+			end
+		elseif( equipSlot == "Trinket0Slot" or equipSlot == "Trinket1Slot" ) then
+			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Trinket0Slot)
+			if( link ) then
+				table.insert(itemList, link)
+			end
+			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Trinket1Slot)
+			if( link ) then
+				table.insert(itemList, link)
+			end
+		else
+			local link = GetInventoryItemLink("player", ItemSets.equipSlots[equipSlot])
+			if( link ) then
+				table.insert(itemList, link)
+			end
+		end
+	end
+	
 	return itemList
 end
 
@@ -202,21 +236,33 @@ function Character:GetBackgroundTexture(slot)
 	return textureName
 end
 
+function Character:ResetMouseTimeout()
+	mouseTimeout = MOUSE_TIMEOUT
+end
+
 -- Tooltips
---/script ItemSets.modules.Character:CreateMenu("FeetSlot", CharacterFeetSlot, "RIGHT")
 local mouseOverMenu
 local function showTooltip(self)
-	mouseTimeout = MOUSE_TIMEOUT
+	Character:ResetMouseTimeout()
 	mouseOverMenu = true
 	
 	if( self.itemLink == "" ) then
 		return
 	end
 	
-	local bag, slot = ItemSets:FindItem(ItemSets:GetBaseData(self.itemLink))
-	
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	GameTooltip:SetBagItem(bag, slot)
+	local bag, slot = ItemSets:FindItem(ItemSets:GetBaseData(self.itemLink))
+	if( bag and slot ) then
+		GameTooltip:SetBagItem(bag, slot)
+	else
+		local baseLink = ItemSets:GetBaseData(self.itemLink)
+		for _, inventoryID in pairs(ItemSets.equipSlots) do
+			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == baseLink ) then
+				GameTooltip:SetInventoryItem("player", inventoryID)
+				break
+			end
+		end
+	end
 	GameTooltip:Show()
 end
 
@@ -226,19 +272,13 @@ local function hideTooltip(self)
 	GameTooltip:Hide()
 end
 
--- Equip a single item
-local function equipItem(self)
-	Character:HideMenu()
-	ItemSets:EquipSingle(self.equipSlot, ItemSets:GetBaseData(self.itemLink))
-end
-
 -- Inventory changed, update menu
 function Character:UNIT_INVENTORY_CHANGED(event, unit)
 	if( unit ~= "player" and equipButtons[1]:IsVisible() ) then
 		return
 	end
 	
-	self:CreateMenu(equipButtons[1].equipSlot, equipButtons[1].parent, equipButtons[1].direction)
+	self:CreateMenu(equipButtons[1].equipSlot, equipButtons[1].parent, equipButtons[1].direction, equipButtons[1].onClick, equipButtons[1].checkEquipped)
 end
 
 -- Create/update menu
@@ -248,8 +288,8 @@ function Character:HideMenu()
 	end
 end
 
-function Character:CreateMenu(slot, parent, direction)
-	local items = self:FindItems(slot)
+function Character:CreateMenu(slot, parent, direction, onClick, checkEquipped)
+	local items = self:FindItems(slot, checkEquipped)
 
 	-- Insert the blank one that will act as the unequip button
 	table.insert(items, "")
@@ -271,7 +311,7 @@ function Character:CreateMenu(slot, parent, direction)
 			button:SetClampedToScreen(true)
 			button:SetScript("OnEnter", showTooltip)
 			button:SetScript("OnLeave", hideTooltip)
-			button:SetScript("OnClick", equipItem)
+			button:SetScript("OnClick", onClick)
 			button:Hide()
 			
 			table.insert(equipButtons, button)
@@ -302,7 +342,12 @@ function Character:CreateMenu(slot, parent, direction)
 	end
 	
 	-- Update buttons to the item list
+	-- Numbers yoinked from ItemRack!
+	local columns = (#(items) >= 25 and 6) or (#(items) >= 19 and 5) or (#(items) >= 10 and 4) or (#(items) >= 5 and 3)
+	local lastColumn
 	local usedButtons = 0
+	local inRow = 0
+
 	for _, link in pairs(items) do
 		usedButtons = usedButtons + 1
 		
@@ -316,41 +361,55 @@ function Character:CreateMenu(slot, parent, direction)
 		button.equipSlot = slot
 		button.direction = direction
 		button.parent = parent
+		button.onClick = onClick
+		button.checkEquipped = checkEquipped
 		button.texture:SetTexture(icon)
+		button:ClearAllPoints()
 		button:Show()
 		
+		-- Positioning!
 		if( direction == "RIGHT" ) then
-			if( usedButtons > 1 ) then
-				button:ClearAllPoints()
-				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "TOPRIGHT", 1, 0)
-			else
-				button:ClearAllPoints()
+			if( usedButtons == 1 ) then
 				button:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, -1)
+			elseif( inRow == columns ) then
+				button:SetPoint("TOPLEFT", lastColumn, "BOTTOMLEFT", 1, 0)
+			else
+				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "TOPRIGHT", 1, 0)
 			end
 		elseif( direction == "LEFT" ) then
-			if( usedButtons > 1 ) then
-				button:ClearAllPoints()
-				button:SetPoint("TOPRIGHT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
-			else
-				button:ClearAllPoints()
+			if( usedButtons == 1 ) then
 				button:SetPoint("TOPRIGHT", parent, "TOPLEFT", -4, -2)
-			end
+			elseif( inRow == columns ) then
+				button:SetPoint("TOPRIGHT", lastColumn, "BOTTOMRIGHT", 0, 0)
+      			else
+				button:SetPoint("TOPRIGHT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
+			end		
 		elseif( direction == "UP" ) then
-			if( usedButtons > 1 ) then
-				button:ClearAllPoints()
-				button:SetPoint("BOTTOMLEFT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
-			else
-				button:ClearAllPoints()
+			if( usedButtons == 1 ) then
 				button:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 3, 4)
+			elseif( inRow == columns ) then
+				button:SetPoint("BOTTOMRIGHT", lastColumn, "BOTTOMLEFT", 0, 0)
+      			else
+      				button:SetPoint("BOTTOMLEFT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
 			end
 		elseif( direction == "DOWN" ) then
-			if( usedButtons > 1 ) then
-				button:ClearAllPoints()
-				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "BOTTOMLEFT", 0, 0)
-			else
-				button:ClearAllPoints()
+			if( usedButtons == 1 ) then
 				button:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 2, -4)
+			elseif( inRow == columns ) then
+				button:SetPoint("BOTTOMRIGHT", lastColumn, "BOTTOMLEFT", 0, 0)
+			else
+				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "BOTTOMLEFT", 0, 0)
 			end
+		end
+		
+		if( usedButtons == 1 ) then
+			inRow = inRow + 1
+			lastColumn = button
+		elseif( inRow == columns ) then
+			inRow = 1
+			lastColumn = button
+		else
+			inRow = inRow + 1
 		end
 	end
 end
