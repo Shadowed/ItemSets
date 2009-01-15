@@ -39,6 +39,8 @@ ItemSetLocals = {
 	["Push"] = "Push",
 	["Pull"] = "Pull",
 	
+	["Toggles all slots being enabled or disabled for management."] = "Toggles all slots being enabled or disabled for management.",
+	
 	["Pulls all the items from this set into your inventory, from your bank."] = "Pulls all the items from this set into your inventory, from your bank.",
 	["Pushes all the items from this set into your bank, from your inventory."] = "Pushes all the items from this set into your bank, from your inventory.",
 	

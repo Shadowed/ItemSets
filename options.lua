@@ -1,5 +1,7 @@
 local Config = ItemSets:NewModule("Config")
 local Character, lockedSet
+local totalSets = 0
+local MAX_SETS_SHOWN = 10
 local equipButtons = {}
 local directions = {["AmmoSlot"] = "DOWN", ["MainHandSlot"] = "DOWN", ["SecondaryHandSlot"] = "DOWN", ["RangedSlot"] = "DOWN",
 ["HeadSlot"] = "LEFT", ["NeckSlot"] = "LEFT", ["ShoulderSlot"] = "LEFT", ["ShirtSlot"] = "LEFT", ["ChestSlot"] = "LEFT", ["WristSlot"] = "LEFT", ["BackSlot"] = "LEFT", ["TabardSlot"] = "LEFT",
@@ -35,7 +37,7 @@ local function showTooltip(self)
 	local bag, slot = ItemSets:FindItem(self.itemLink)
 	if( bag and slot ) then
 		GameTooltip:SetBagItem(bag, slot)
-	else
+	elseif( IsEquippedItem(self.itemLink) ) then
 		for _, inventoryID in pairs(ItemSets.equipSlots) do
 			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == self.itemLink ) then
 				GameTooltip:SetInventoryItem("player", inventoryID)
@@ -65,6 +67,8 @@ function Config:CreateButton(slot)
 	button.itemLink = ""
 	button.isEnabled = true
 	
+	button.highlight = button:GetHighlightTexture()
+	
 	button.texture:SetTexture(Character:GetBackgroundTexture(slot))
 	button:SetScript("OnEnter", showTooltip)
 	button:SetScript("OnLeave", hideTooltip)
@@ -87,16 +91,27 @@ local function displaySet(name)
 		if( button ) then
 			local link = set[inventoryID]
 			local icon = Character:GetBackgroundTexture(slot)
-
+			
+			button:UnlockHighlight()
+			
 			-- Not managing this slot
 			if( not link ) then
 				button.isEnabled = false
 				button.texture:SetAlpha(0.25)
+				
 			elseif( link ~= "" ) then
 				button.isEnabled = true
 				button.texture:SetAlpha(1.0)
 				
 				icon = select(10, GetItemInfo(link)) or icon
+				
+				-- If it's not equipped, red border
+				if( not ItemSets:FindItem(link) and not IsEquippedItem(link) ) then
+					button.highlight:SetVertexColor(1.0, 0.10, 0.10, 1.0)
+					button:LockHighlight()
+				else
+					button.highlight:SetVertexColor(1.0, 1.0, 1.0, 1.0)
+				end
 			end
 
 			button.itemLink = link
@@ -173,13 +188,31 @@ local function createNewSet(self)
 	end
 
 	ItemSets.db.profile.sets[self.name] = {helm = true, cloak = true}
-	for slot in pairs(ItemSets.equipSlots) do
-		ItemSets.db.profile.sets[self.name][slot] = ""
+	for slot, inventoryID in pairs(ItemSets.equipSlots) do
+		local link
+		if( not lockedSet ) then
+			link = ItemSets:GetBaseData((GetInventoryItemLink("player", inventoryID)))
+		else
+			link = ItemSets.db.profile.sets[lockedSet][inventoryID]
+		end
+		
+		ItemSets.db.profile.sets[self.name][inventoryID] = link or ""
 	end
 	
 	Config:UpdateSetRows()
 	
 	selectSet(self)
+end
+
+-- Toggle slots
+local enabled = true
+local function toggleEnabled(self)
+	enabled = not enabled
+	
+	for _, button in pairs(equipButtons) do
+		button.isEnabled = enabled
+		button.texture:SetAlpha(button.isEnabled and 1.0 or 0.25)
+	end
 end
 
 -- Push/pulling
@@ -206,55 +239,75 @@ function Config:UpdateSetRows()
 	for _, button in pairs(self.frame.setFrame.rows) do
 		button:Hide()
 	end
+		
+	totalSets = 0
+	for name in pairs(ItemSets.db.profile.sets) do
+		totalSets = totalSets + 1
+	end
+	
+	FauxScrollFrame_Update(self.frame.setFrame.scroll, totalSets, MAX_SETS_SHOWN - 1, 15)
 
+	local offset = FauxScrollFrame_GetOffset(self.frame.setFrame.scroll)
+	totalSets = 0
+		
 	local usedRows = 0
 	for name, items in pairs(ItemSets.db.profile.sets) do
-		usedRows = usedRows + 1
+		totalSets = totalSets + 1
+		
+		if( totalSets >= offset and usedRows < 10 ) then
+			usedRows = usedRows + 1
 
-		local row = self.frame.setFrame.rows[usedRows]
-		if( not row ) then
-			row = CreateFrame("Button", nil, self.frame.setFrame)
-			row:SetHeight(15)
-			row:SetWidth(102)
-			row:SetHighlightFontObject(GameFontNormal)
-			row:SetNormalFontObject(GameFontHighlight)
-			row:SetScript("OnEnter", previewSet)
-			row:SetScript("OnClick", selectSet)
-			row:SetText("*")
-			row:GetFontString():SetPoint("TOPLEFT", row)
+			local row = self.frame.setFrame.rows[usedRows]
+			if( not row ) then
+				row = CreateFrame("Button", nil, self.frame.setFrame)
+				row:SetHeight(15)
+				row:SetWidth(80)
+				row:SetHighlightFontObject(GameFontNormal)
+				row:SetNormalFontObject(GameFontHighlight)
+				row:SetScript("OnEnter", previewSet)
+				row:SetScript("OnClick", selectSet)
+				row:SetText("*")
+				row:GetFontString():SetPoint("TOPLEFT", row)
 
-			row.push = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
-			row.push:SetText("Push")
-			row.push:SetPoint("TOPRIGHT", row, "TOPRIGHT", 31, 0)
-			row.push:SetHeight(15)
-			row.push:SetWidth(34)
-			row.push:SetScript("OnClick", pushSet)
-			row.push:SetScript("OnEnter", showTextTooltip)
-			row.push:SetScript("OnLeave", hideTooltip)
-			row.push.tooltip = L["Pushes all the items from this set into your bank, from your inventory."]
+				row.push = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
+				row.push:SetText("Push")
+				row.push:SetPoint("TOPRIGHT", row, "TOPRIGHT", 31, 0)
+				row.push:SetHeight(15)
+				row.push:SetWidth(34)
+				row.push:SetScript("OnClick", pushSet)
+				row.push:SetScript("OnEnter", showTextTooltip)
+				row.push:SetScript("OnLeave", hideTooltip)
+				row.push.tooltip = L["Pushes all the items from this set into your bank, from your inventory."]
 
-			row.pull = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
-			row.pull:SetText("Pull")
-			row.pull:SetPoint("TOPLEFT", row.push, "TOPRIGHT", 0, 0)
-			row.pull:SetHeight(15)
-			row.pull:SetWidth(34)
-			row.pull:SetScript("OnClick", pullSet)
-			row.pull:SetScript("OnEnter", showTextTooltip)
-			row.pull:SetScript("OnLeave", hideTooltip)
-			row.pull.tooltip = L["Pulls all the items from this set into your inventory, from your bank."]
+				row.pull = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
+				row.pull:SetText("Pull")
+				row.pull:SetPoint("TOPLEFT", row.push, "TOPRIGHT", 2, 0)
+				row.pull:SetHeight(15)
+				row.pull:SetWidth(34)
+				row.pull:SetScript("OnClick", pullSet)
+				row.pull:SetScript("OnEnter", showTextTooltip)
+				row.pull:SetScript("OnLeave", hideTooltip)
+				row.pull.tooltip = L["Pulls all the items from this set into your inventory, from your bank."]
 
-			if( usedRows > 1 ) then
-				row:SetPoint("TOPLEFT", self.frame.setFrame.rows[usedRows - 1], "BOTTOMLEFT", 1, -7)
-			else
-				row:SetPoint("TOPLEFT", self.frame.setFrame, "TOPLEFT", 1, -1)
+				if( usedRows > 1 ) then
+					row:SetPoint("TOPLEFT", self.frame.setFrame.rows[usedRows - 1], "BOTTOMLEFT", 0, -8)
+				else
+					row:SetPoint("TOPLEFT", self.frame.setFrame, "TOPLEFT", 2, -2)
+				end
+
+				self.frame.setFrame.rows[usedRows] = row
 			end
 			
-			self.frame.setFrame.rows[usedRows] = row
+			if( self.frame.setFrame.scroll:IsVisible() ) then
+				row:SetWidth(80)
+			else
+				row:SetWidth(100)
+			end
+
+			row.name = name
+			row:SetText(name)
+			row:Show()
 		end
-		
-		row.name = name
-		row:SetText(name)
-		row:Show()
 	end
 end
 
@@ -356,6 +409,20 @@ function Config:Open()
 	
 	self.frame.titleFrame = titleFrame
 	
+	-- Toggle listed items
+	local toggle = CreateFrame("Button", nil, frame.titleFrame.button, "UIPanelButtonGrayTemplate")
+	toggle:SetText("Toggle")
+	toggle:SetPoint("TOPLEFT", frame.titleFrame, "TOPLEFT", 0, -1)
+	toggle:SetFrameStrata("HIGH")
+	toggle:SetHeight(16)
+	toggle:SetWidth(55)
+	toggle:SetScript("OnClick", toggleEnabled)
+	toggle:SetScript("OnEnter", showTextTooltip)
+	toggle:SetScript("OnLeave", hideTooltip)
+	toggle.tooltip = L["Toggles all slots being enabled or disabled for management."]
+	
+	self.frame.titleFrame.toggle = toggle
+
 	-- Special!
 	table.insert(UISpecialFrames, "ItemSetsOptions")
 
@@ -433,6 +500,24 @@ function Config:Open()
 	frame.setFrame:SetPoint("CENTER", frame, "CENTER", 0, 20)
 	frame.setFrame.rows = {}
 
+	-- Stupid scroll bars
+	local function updatePage()
+		Config:UpdateSetRows()
+	end
+	
+	local scroll = CreateFrame("ScrollFrame", frame:GetName() .. "ScrollBar", frame.setFrame, "FauxScrollFrameTemplate")
+	scroll:SetPoint("TOPLEFT", 0, -2)
+	scroll:SetPoint("BOTTOMRIGHT", -23, 50)
+	scroll:SetScript("OnVerticalScroll", function(self, step) FauxScrollFrame_OnVerticalScroll(self, step, 15, updatePage) end)
+
+	local child = CreateFrame("Frame", nil, scroll)
+	scroll:SetScrollChild(child)
+	child:SetHeight(2)
+	child:SetWidth(2)
+	
+	frame.setFrame.scroll = scroll
+	frame.setFrame.child = child
+	
 	self:UpdateSetRows()
 	
 	-- Save/Delete/Show Cloak/Show Helm

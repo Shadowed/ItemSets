@@ -1,7 +1,7 @@
 local Character = ItemSets:NewModule("Character", "AceEvent-3.0")
-local iconButtons, itemList, equipButtons = {}, {}, {}
-local canUseOH, hasTitansGrip, durabilityPattern, requiresPattern, requiresExactPattern, menuOpened, mouseTimeout
-local MOUSE_TIMEOUT = 1.5
+local iconButtons = {}
+local canUseOH, hasTitansGrip, durabilityPattern, requiresPattern, requiresExactPattern, menuOpened, mouseTimeout, equipButtons, usedButtons
+local MOUSE_TIMEOUT = 1
 
 -- Should figure out a clean way to make this dynamic
 local directions = {["AmmoSlot"] = "UP", ["MainHandSlot"] = "UP", ["SecondaryHandSlot"] = "UP", ["RangedSlot"] = "UP",
@@ -10,33 +10,20 @@ local directions = {["AmmoSlot"] = "UP", ["MainHandSlot"] = "UP", ["SecondaryHan
 ["WaistSlot"] = "LEFT", ["LegsSlot"] = "LEFT", ["FeetSlot"] = "LEFT", ["HandsSlot"] = "LEFT", ["Finger0Slot"] = "LEFT", ["Finger1Slot"] = "LEFT", ["Trinket0Slot"] = "LEFT",
 ["Trinket1Slot"] = "LEFT"}
 
+-- What item type can go into what slot
 local equipLocations = {
-	["AmmoSlot"] = "INVTYPE_AMMO",
-	["HeadSlot"] = "INVTYPE_HEAD",
-	["NeckSlot"] = "INVTYPE_NECK",
-	["ShoulderSlot"] = "INVTYPE_SHOULDER",
-	["ShirtSlot"] = "INVTYPE_BODY",
-	["ChestSlot"] = {["INVTYPE_ROBE"] = true, ["INVTYPE_CHEST"] = true},
-	["WaistSlot"] = "INVTYPE_WAIST",
-	["LegsSlot"] = "INVTYPE_LEGS",
-	["FeetSlot"] = "INVTYPE_FEET",
-	["WristSlot"] = "INVTYPE_WRIST",
-	["HandsSlot"] = "INVTYPE_HAND",
-	["Finger0Slot"] = "INVTYPE_FINGER",
-	["Finger1Slot"] = "INVTYPE_FINGER",
-	["Trinket0Slot"] = "INVTYPE_TRINKET",
-	["Trinket1Slot"] = "INVTYPE_TRINKET",
-	["BackSlot"] = "INVTYPE_CLOAK",
-	["MainHandSlot"] = {["INVTYPE_WEAPON"] = true, ["INVTYPE_2HWEAPON"] = true, ["INVTYPE_WEAPONMAINHAND"] = true},
+	["AmmoSlot"] = "INVTYPE_AMMO", ["HeadSlot"] = "INVTYPE_HEAD", ["NeckSlot"] = "INVTYPE_NECK", ["ShoulderSlot"] = "INVTYPE_SHOULDER", ["ShirtSlot"] = "INVTYPE_BODY",
+	["ChestSlot"] = {["INVTYPE_ROBE"] = true, ["INVTYPE_CHEST"] = true}, ["WaistSlot"] = "INVTYPE_WAIST", ["LegsSlot"] = "INVTYPE_LEGS", ["FeetSlot"] = "INVTYPE_FEET",
+	["WristSlot"] = "INVTYPE_WRIST", ["HandsSlot"] = "INVTYPE_HAND", ["Finger0Slot"] = "INVTYPE_FINGER", ["Finger1Slot"] = "INVTYPE_FINGER", ["Trinket0Slot"] = "INVTYPE_TRINKET",
+	["Trinket1Slot"] = "INVTYPE_TRINKET", ["BackSlot"] = "INVTYPE_CLOAK", ["MainHandSlot"] = {["INVTYPE_WEAPON"] = true, ["INVTYPE_2HWEAPON"] = true, ["INVTYPE_WEAPONMAINHAND"] = true},
 	["SecondaryHandSlot"] = {["INVTYPE_WEAPON"] = true, ["INVTYPE_2HWEAPON"] = true, ["INVTYPE_WEAPONOFFHAND"] = true, ["INVTYPE_SHIELD"] = true, ["INVTYPE_HOLDABLE"] = true},
-	["RangedSlot"] = {["INVTYPE_RANGED"] = true, ["INVTYPE_THROWN"] = true, ["INVTYPE_RANGEDRIGHT"] = true, ["INVTYPE_RELIC"] = true},
-	["TabardSlot"] = "INVTYPE_TABARD",
+	["RangedSlot"] = {["INVTYPE_RANGED"] = true, ["INVTYPE_THROWN"] = true, ["INVTYPE_RANGEDRIGHT"] = true, ["INVTYPE_RELIC"] = true}, ["TabardSlot"] = "INVTYPE_TABARD",
 }
 
 function Character:OnInitialize()
 	self.buttons = equipButtons
 	
-	-- Update item icons if the doll is opened
+	-- Show little icons to indicate that we have something queued to equip
 	local orig_PaperDollFrame_OnShow = PaperDollFrame:GetScript("OnShow")
 	PaperDollFrame:SetScript("OnShow", function(...)
 		if( orig_PaperDollFrame_OnShow ) then
@@ -52,7 +39,7 @@ function Character:OnInitialize()
 	requiresExactPattern = "^" .. requiresPattern
 	durabilityPattern = string.gsub(DURABILITY_TEMPLATE, "%%d", "([0-9]+)")
 	
-	-- Setup menu to work with the character screen
+	-- Hook into the character selection screen
 	local function equipItem(self)
 		Character:HideMenu()
 		ItemSets:EquipSingle(self.equipSlot, ItemSets:GetBaseData(self.itemLink))
@@ -83,10 +70,115 @@ function Character:OnInitialize()
 		frame:SetScript("OnEnter", onEnter)
 		frame:SetScript("OnLeave", onLeave)
 	end
+	
+	-- Now you're thinking with meta tables!
+	equipButtons = setmetatable({}, {__index = function(t, k)
+		local row = Character:CreateButton()
+		rawset(t, k, row)
+
+		return row
+	end})
+end
+
+-- Tooltips
+local mouseOverMenu
+local function showTooltip(self)
+	Character:ResetMouseTimeout()
+	mouseOverMenu = true
+	
+	if( self.itemLink == "" ) then
+		return
+	end
+	
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	local bag, slot = ItemSets:FindItem(ItemSets:GetBaseData(self.itemLink))
+	if( bag and slot ) then
+		GameTooltip:SetBagItem(bag, slot)
+	elseif( IsEquippedItem(self.itemLink) ) then
+		local baseLink = ItemSets:GetBaseData(self.itemLink)
+		for _, inventoryID in pairs(ItemSets.equipSlots) do
+			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == baseLink ) then
+				GameTooltip:SetInventoryItem("player", inventoryID)
+				break
+			end
+		end
+	end
+	GameTooltip:Show()
+end
+
+local function hideTooltip(self)
+	mouseOverMenu = nil
+	
+	GameTooltip:Hide()
+end
+
+-- Create new button
+function Character:CreateButton()
+	local id = #(equipButtons) + 1
+	local button = CreateFrame("Button", "ItemSetsMenuButton" .. id, UIParent, "ItemButtonTemplate")
+	button.texture = getglobal(button:GetName() .. "IconTexture")
+	button.border = getglobal(button:GetName() .. "NormalTexture")
+	button.border:SetHeight(54)
+	button.border:SetWidth(54)
+	
+	button.highlight = button:GetHighlightTexture()
+
+	button:SetWidth(32)
+	button:SetHeight(32)
+	button:SetClampedToScreen(true)
+	button:SetScript("OnEnter", showTooltip)
+	button:SetScript("OnLeave", hideTooltip)
+	button:Hide()
+
+	if( id == 1 ) then
+		-- Check inventory while the menus visible
+		button:SetScript("OnShow", function()
+			Character:RegisterEvent("UNIT_INVENTORY_CHANGED")
+		end)
+		button:SetScript("OnHide", function()
+			Character:UnregisterEvent("UNIT_INVENTORY_CHANGED")
+		end)
+
+		-- Check if we should hide the menu
+		button:SetScript("OnUpdate", function(self, elapsed)
+			-- After 2 seconds of not being inside the menu buttons, we hide it regardless
+			if( mouseTimeout and not mouseOverMenu ) then
+				mouseTimeout = mouseTimeout - elapsed
+
+				if( mouseTimeout <= 0 and not MouseIsOver(self:GetParent()) ) then
+					mouseTimeout = nil
+					Character:HideMenu()
+				end
+			end
+		end)
+	end
+	
+	return button
+end
+
+-- Setup a new menu button (obviously)
+function Character:AddMenuButton(link, type, slot)
+	usedButtons = usedButtons + 1
+	
+	local icon = select(10, GetItemInfo(link)) or self:GetBackgroundTexture(slot)
+	local button = equipButtons[usedButtons]
+	
+	-- Banked, blue border
+	if( type == "bank" ) then
+		button.highlight:SetVertexColor(0.10, 0.10, 1.0, 1.0)
+		button:LockHighlight()
+	else
+		button.highlight:SetVertexColor(1.0, 1.0, 1.0, 1.0)
+	end
+	
+	button.itemLink = link
+	button.texture:SetTexture(icon)
+	button:ClearAllPoints()
+	button:Show()
 end
 
 -- Item finding
--- Optimize this a bit later
+-- Figure out how to optimize this a bit later
 function Character:IsWearable(bag, slot, equipSlot, weaponType)
 	if( not ItemSets.tooltip ) then
 		ItemSets.tooltip = CreateFrame("GameTooltip", "ItemSetsScanTooltip", UIParent, "GameTooltipTemplate")
@@ -144,7 +236,8 @@ function Character:IsWearable(bag, slot, equipSlot, weaponType)
 	return true
 end
 
-function Character:CheckEquipSkill()
+function Character:BuildItemMenu(equipSlot, checkEquipped)
+	-- Check what we can wear
 	local class = select(2, UnitClass("player"))
 	if( class == "ROGUE" or class == "HUNTER" or class == "DEATHKNIGHT" ) then
 		canUseOH = true
@@ -154,14 +247,13 @@ function Character:CheckEquipSkill()
 	elseif( class == "SHAMAN" ) then
 		canUseOH = (select(5, GetTalentInfo(2, 18)) > 0)
 	end
-end
 
-function Character:FindItems(equipSlot, checkEquipped)
-	self:CheckEquipSkill()
-	
-	for i=#(itemList), 1, -1 do table.remove(itemList, i) end
+	-- And figure out what item types we can wear
 	local acceptable = equipLocations[equipSlot]
 	local isTable = type(acceptable) == "table"	
+
+	-- Reset our buttons
+	self:HideMenu()
 	
 	-- Scan inventory
 	for bag=4, 0, -1 do
@@ -172,7 +264,7 @@ function Character:FindItems(equipSlot, checkEquipped)
 					-- Can this be nil?
 					local weaponType = select(9, GetItemInfo(link))
 					if( ( ( not isTable and acceptable == weaponType ) or ( isTable and acceptable[weaponType] ) ) and self:IsWearable(bag, slot, equipSlot, weaponType) ) then
-						table.insert(itemList, link)
+						self:AddMenuButton(link, "inventory", equipSlot)
 					end
 				end
 			end
@@ -189,7 +281,7 @@ function Character:FindItems(equipSlot, checkEquipped)
 						-- Can this be nil?
 						local weaponType = select(9, GetItemInfo(link))
 						if( ( ( not isTable and acceptable == weaponType ) or ( isTable and acceptable[weaponType] ) ) and self:IsWearable(bag, slot, equipSlot, weaponType) ) then
-							table.insert(itemList, link)
+							self:AddMenuButton(link, "bank", equipSlot)
 						end
 					end
 				end
@@ -203,30 +295,31 @@ function Character:FindItems(equipSlot, checkEquipped)
 		if( equipSlot == "Finger0Slot" or equipSlot == "Finger1Slot" ) then
 			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Finger0Slot)
 			if( link ) then
-				table.insert(itemList, link)
+				self:AddMenuButton(link, "equipped", equipSlot)
 			end
 			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Finger1Slot)
 			if( link ) then
-				table.insert(itemList, link)
+				self:AddMenuButton(link, "equipped", equipSlot)
 			end
 		elseif( equipSlot == "Trinket0Slot" or equipSlot == "Trinket1Slot" ) then
 			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Trinket0Slot)
 			if( link ) then
-				table.insert(itemList, link)
+				self:AddMenuButton(link, "equipped", equipSlot)
 			end
 			local link = GetInventoryItemLink("player", ItemSets.equipSlots.Trinket1Slot)
 			if( link ) then
-				table.insert(itemList, link)
+				self:AddMenuButton(link, "equipped", equipSlot)
 			end
 		else
 			local link = GetInventoryItemLink("player", ItemSets.equipSlots[equipSlot])
 			if( link ) then
-				table.insert(itemList, link)
+				self:AddMenuButton(link, "equipped", equipSlot)
 			end
 		end
 	end
 	
-	return itemList
+	-- Now the blank one
+	self:AddMenuButton("", "unequip", equipSlot)
 end
 
 -- Fancy menus showing things
@@ -243,37 +336,8 @@ function Character:ResetMouseTimeout()
 	mouseTimeout = MOUSE_TIMEOUT
 end
 
--- Tooltips
-local mouseOverMenu
-local function showTooltip(self)
-	Character:ResetMouseTimeout()
-	mouseOverMenu = true
-	
-	if( self.itemLink == "" ) then
-		return
-	end
-	
-	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	local bag, slot = ItemSets:FindItem(ItemSets:GetBaseData(self.itemLink))
-	if( bag and slot ) then
-		GameTooltip:SetBagItem(bag, slot)
-	else
-		local baseLink = ItemSets:GetBaseData(self.itemLink)
-		for _, inventoryID in pairs(ItemSets.equipSlots) do
-			if( ItemSets:GetBaseData(GetInventoryItemLink("player", inventoryID)) == baseLink ) then
-				GameTooltip:SetInventoryItem("player", inventoryID)
-				break
-			end
-		end
-	end
-	GameTooltip:Show()
-end
-
-local function hideTooltip(self)
-	mouseOverMenu = nil
-	
-	GameTooltip:Hide()
-end
+-- Info on the menu currently up
+local currentMenu = {}
 
 -- Inventory changed, update menu
 function Character:UNIT_INVENTORY_CHANGED(event, unit)
@@ -281,131 +345,79 @@ function Character:UNIT_INVENTORY_CHANGED(event, unit)
 		return
 	end
 	
-	self:CreateMenu(equipButtons[1].equipSlot, equipButtons[1].parent, equipButtons[1].direction, equipButtons[1].onClick, equipButtons[1].checkEquipped)
+	self:CreateMenu(currentMenu.equipSlot, currentMenu.parent, currentMenu.direction, currentMenu.onClick, currentMenu.checkEquipped)
 end
 
 -- Create/update menu
 function Character:HideMenu()
+	usedButtons = 0
+
 	for _, button in pairs(equipButtons) do
+		button:UnlockHighlight()
 		button:Hide()
 	end
 end
 
 function Character:CreateMenu(slot, parent, direction, onClick, checkEquipped)
-	local items = self:FindItems(slot, checkEquipped)
-
-	-- Insert the blank one that will act as the unequip button
-	table.insert(items, "")
+	currentMenu.equipSlot = slot
+	currentMenu.direction = direction
+	currentMenu.parent = parent
+	currentMenu.onClick = onClick
+	currentMenu.checkEquipped = checkEquipped
 	
-	-- Hide current buttons first
-	self:HideMenu()
+	-- Build it
+	self:BuildItemMenu(slot, checkEquipped)	
 
-	-- Not enough buttons, creation time
-	if( #(items) > #(equipButtons) ) then
-		for i=#(equipButtons) + 1, #(items) do
-			local button = CreateFrame("Button", "ItemSetsMenuButton" .. i, UIParent, "ItemButtonTemplate")
-			button.texture = getglobal(button:GetName() .. "IconTexture")
-			button.border = getglobal(button:GetName() .. "NormalTexture")
-			button.border:SetHeight(54)
-			button.border:SetWidth(54)
-			
-			button:SetWidth(32)
-			button:SetHeight(32)
-			button:SetClampedToScreen(true)
-			button:SetScript("OnEnter", showTooltip)
-			button:SetScript("OnLeave", hideTooltip)
-			button:SetScript("OnClick", onClick)
-			button:Hide()
-			
-			table.insert(equipButtons, button)
-
-			if( i == 1 ) then
-				-- Check inventory while the menus visible
-				button:SetScript("OnShow", function()
-					Character:RegisterEvent("UNIT_INVENTORY_CHANGED")
-				end)
-				button:SetScript("OnHide", function()
-					Character:UnregisterEvent("UNIT_INVENTORY_CHANGED")
-				end)
-				
-				-- Check if we should hide the menu
-				button:SetScript("OnUpdate", function(self, elapsed)
-					-- After 2 seconds of not being inside the menu buttons, we hide it regardless
-					if( mouseTimeout and not mouseOverMenu ) then
-						mouseTimeout = mouseTimeout - elapsed
-						
-						if( mouseTimeout <= 0 and not MouseIsOver(self.parent) ) then
-							mouseTimeout = nil
-							Character:HideMenu()
-						end
-					end
-				end)
-			end
-		end
-	end
-	
-	-- Update buttons to the item list
-	-- Numbers yoinked from ItemRack!
-	local columns = (#(items) >= 25 and 6) or (#(items) >= 19 and 5) or (#(items) >= 10 and 4) or (#(items) >= 5 and 3)
+	-- Update buttons to the item list, numbers yoinked from ItemRack!
+	local columns = (usedButtons >= 25 and 6) or (usedButtons >= 19 and 5) or (usedButtons >= 10 and 4) or (usedButtons >= 5 and 3)
 	local lastColumn
-	local usedButtons = 0
 	local inRow = 0
 
-	for _, link in pairs(items) do
-		usedButtons = usedButtons + 1
-		
-		local icon = select(10, GetItemInfo(link)) or self:GetBackgroundTexture(slot)
-		local button = equipButtons[usedButtons]
-				
+	-- Position it all, this needs to be smart and choose a new direction if it's going to hit the screen
+	for id=1, usedButtons do
+		-- Setup parenting type of things
+		local button = equipButtons[id]
 		button:SetParent(parent)
 		button:SetFrameStrata("HIGH")
-		
-		button.itemLink = link
+		button:SetScript("OnClick", onClick)
 		button.equipSlot = slot
-		button.direction = direction
-		button.parent = parent
-		button.onClick = onClick
-		button.checkEquipped = checkEquipped
-		button.texture:SetTexture(icon)
-		button:ClearAllPoints()
-		button:Show()
-		
+
 		-- Positioning!
 		if( direction == "RIGHT" ) then
-			if( usedButtons == 1 ) then
+			if( id == 1 ) then
 				button:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, -1)
 			elseif( inRow == columns ) then
 				button:SetPoint("TOPLEFT", lastColumn, "BOTTOMLEFT", 1, 0)
 			else
-				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "TOPRIGHT", 1, 0)
+				button:SetPoint("TOPLEFT", equipButtons[id - 1], "TOPRIGHT", 1, 0)
 			end
 		elseif( direction == "LEFT" ) then
-			if( usedButtons == 1 ) then
+			if( id == 1 ) then
 				button:SetPoint("TOPRIGHT", parent, "TOPLEFT", -4, -2)
 			elseif( inRow == columns ) then
 				button:SetPoint("TOPRIGHT", lastColumn, "BOTTOMRIGHT", 0, 0)
-      			else
-				button:SetPoint("TOPRIGHT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
+			else
+				button:SetPoint("TOPRIGHT", equipButtons[id - 1], "TOPLEFT", 0, 0)
 			end		
 		elseif( direction == "UP" ) then
-			if( usedButtons == 1 ) then
+			if( id == 1 ) then
 				button:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 3, 4)
 			elseif( inRow == columns ) then
 				button:SetPoint("BOTTOMRIGHT", lastColumn, "BOTTOMLEFT", 0, 0)
-      			else
-      				button:SetPoint("BOTTOMLEFT", equipButtons[usedButtons - 1], "TOPLEFT", 0, 0)
+			else
+				button:SetPoint("BOTTOMLEFT", equipButtons[id - 1], "TOPLEFT", 0, 0)
 			end
 		elseif( direction == "DOWN" ) then
-			if( usedButtons == 1 ) then
+			if( id == 1 ) then
 				button:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 2, -4)
 			elseif( inRow == columns ) then
 				button:SetPoint("BOTTOMRIGHT", lastColumn, "BOTTOMLEFT", 0, 0)
 			else
-				button:SetPoint("TOPLEFT", equipButtons[usedButtons - 1], "BOTTOMLEFT", 0, 0)
+				button:SetPoint("TOPLEFT", equipButtons[id - 1], "BOTTOMLEFT", 0, 0)
 			end
 		end
-		
-		if( usedButtons == 1 ) then
+
+		if( id == 1 ) then
 			inRow = inRow + 1
 			lastColumn = button
 		elseif( inRow == columns ) then
