@@ -1,7 +1,7 @@
 ItemSetLocals = {
 	-- Set management errors
 	["Cannot perform swap, you have no space in your bags left."] = "Cannot perform swap, you have no space in your bags left.",
-	["Unable to equip the following items for the set \"%s\": %s"] = "Unable to equip the following items for the set \"%s\": %s",
+	["Unable to equip all items for \"%s\": %s"] = "Unable to equip all items for \"%s\": %s",
 	["Cannot find any sets named \"%s\"."] = "Cannot find any sets named \"%s\".",
 	
 	["Cannot perform push on set \"%s\", requires %d slots open, you only have %d available in your bank."] = "Cannot perform push on set \"%s\", requires %d slots open, you only have %d available in your bank.",

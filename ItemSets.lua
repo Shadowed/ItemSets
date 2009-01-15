@@ -299,6 +299,15 @@ function ItemSets:EquipByName(name)
 	self:Equip(self.db.profile.sets[name], name)
 end
 
+-- Is this weapon a 2H one?
+function ItemSets:Is2HWeapon(equippedLink)
+	if( not equippedLink ) then
+		return false
+	end
+	
+	return select(9, GetItemInfo(equippedLink)) == "INVTYPE_2HWEAPON"
+end
+
 function ItemSets:Equip(set, name)
 	self:ResetLocks()
 	
@@ -308,14 +317,21 @@ function ItemSets:Equip(set, name)
 		hasTitansGrip = (select(5, GetTalentInfo(2, 26)) > 0)
 	end
 	
-	-- Reset our equip order to default
-	for k, v in pairs(equipIDs) do equipOrder[k] = v end
-		
+	-- Reset equip order
+	for i=#(equipOrder), 1, -1 do table.remove(equipOrder, i) end
+	
 	-- If the player has the Titan's Grip talent, and there MH is an invalid TG weapon we must swap the MH first, then the OH
-	if( hasTitansGrip and badTGWeaponType[select(7, GetItemInfo(GetInventoryItemLink("player", 16)))] ) then
-		equipOrder[17] = 16
-		equipOrder[18] = 17
+	-- Or, if the MH is a 2H we need to swap the MH first, then the OH
+	if( self:Is2HWeapon(GetInventoryItemLink("player", 16)) or ( hasTitansGrip and badTGWeaponType[select(7, GetItemInfo(GetInventoryItemLink("player", 16)))] ) ) then
+		table.insert(equipOrder, 16)
+		table.insert(equipOrder, 17)
+	else
+		table.insert(equipOrder, 17)
+		table.insert(equipOrder, 16)
 	end
+
+	-- Load in the defaults
+	for _, inventoryID in pairs(equipIDs) do if( v ~= 16 and v ~= 17 ) then table.insert(equipOrder, inventoryID) end end
 	
 	-- If we're in combat, only let us swap certain items (Ranged, MH, Ammo)
 	local isDead = self:IsDead()
@@ -338,7 +354,7 @@ function ItemSets:Equip(set, name)
 		
 		if( self.db.profile.queued.active ) then
 			self.db.profile.queued.helm = set.helm
-			self.db.proifle.queued.cloak = set.cloak
+			self.db.profile.queued.cloak = set.cloak
 		
 			self.modules.Character:UpdateQueuedItems()
 		end
@@ -356,7 +372,7 @@ function ItemSets:Equip(set, name)
 		local link = set[inventoryID]
 		
 		-- Item already equipped, so we can remove it from the list
-		if( self:GetBaseData(inventoryLink) == link ) then
+		if( IsEquippedItem(link) ) then
 			table.remove(equipOrder, i)
 		
 		-- Check if it has a prismatic gem, and we should unequip the item fully
@@ -401,7 +417,13 @@ function ItemSets:Equip(set, name)
 		
 		if( bag and slot ) then
 			PickupContainerItem(bag, slot)
-			EquipCursorItem(inventoryID)
+			
+			-- MH/OH slots need to be picked up, everything else equipped
+			if( inventoryID ~= 16 and inventoryID ~= 17 ) then
+				EquipCursorItem(inventoryID)
+			else
+				PickupInventoryItem(inventoryID)
+			end
 			
 			-- Do we really need this?
 			if( select(1, GetCursorInfo()) == "item" ) then
@@ -442,7 +464,7 @@ function ItemSets:Equip(set, name)
 	-- Unable to equip some items
 	if( #(badItems) > 0 ) then
 		local items = table.concat(badItems, " ")
-		self:Print(string.format(L["Unable to equip the following items for the set \"%s\": %s"], name, items))
+		self:Print(string.format(L["Unable to equip all items for \"%s\": %s"], name, items))
 
 		for i=#(badItems), 1, -1 do table.remove(badItems, i) end
 	end

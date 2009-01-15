@@ -18,7 +18,7 @@ local function fakeEquip(self)
 	
 	local icon = select(10, GetItemInfo(self.itemLink)) or Character:GetBackgroundTexture(self.equipSlot)
 	local button = equipButtons[self.equipSlot]
-	button.itemLink = ItemSets:GetBaseData(self.itemLink)
+	button.itemLink = ItemSets:GetBaseData(self.itemLink) or ""
 	button.texture:SetTexture(icon)
 	button.isEnabled = true
 	button.texture:SetAlpha(1.0)
@@ -56,6 +56,7 @@ end
 
 local function toggleEnabled(self)
 	self.isEnabled = not self.isEnabled
+	self.itemLink = ""
 	self.texture:SetAlpha(self.isEnabled and 1.0 or 0.25)
 end
 
