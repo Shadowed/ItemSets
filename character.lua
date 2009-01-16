@@ -21,7 +21,9 @@ local equipLocations = {
 }
 
 function Character:OnInitialize()
-	self.buttons = equipButtons
+	-- Register for queue update
+	self:RegisterMessage("IS_UPDATE_QUEUED", "UpdateQueuedItems")
+
 	
 	-- Show little icons to indicate that we have something queued to equip
 	local orig_PaperDollFrame_OnShow = PaperDollFrame:GetScript("OnShow")

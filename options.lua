@@ -271,7 +271,7 @@ function Config:UpdateSetRows()
 				row:GetFontString():SetPoint("TOPLEFT", row)
 
 				row.push = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
-				row.push:SetText("Push")
+				row.push:SetText(L["Push"])
 				row.push:SetPoint("TOPRIGHT", row, "TOPRIGHT", 31, 0)
 				row.push:SetHeight(15)
 				row.push:SetWidth(34)
@@ -281,7 +281,7 @@ function Config:UpdateSetRows()
 				row.push.tooltip = L["Pushes all the items from this set into your bank, from your inventory."]
 
 				row.pull = CreateFrame("Button", nil, row, "UIPanelButtonGrayTemplate")
-				row.pull:SetText("Pull")
+				row.pull:SetText(L["Pull"])
 				row.pull:SetPoint("TOPLEFT", row.push, "TOPRIGHT", 2, 0)
 				row.pull:SetHeight(15)
 				row.pull:SetWidth(34)

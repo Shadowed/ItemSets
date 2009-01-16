@@ -17,6 +17,7 @@ local playerClass, equipQueued
 function ItemSets:OnInitialize()
 	self.defaults = {
 		profile = {
+			setName = "",
 			queued = {},
 			sets = {}
 		},
@@ -238,11 +239,11 @@ function ItemSets:CheckEquipQueue()
 	end
 	
 	-- Equip it
-	self:Equip(self.db.profile.queued, "Queued")
+	self:Equip(self.db.profile.queued, self.db.profile.queued.name or "Queued")
 
 	-- Queued set complete, reset it
 	for k in pairs(self.db.profile.queued) do self.db.profile.queued[k] = nil end
-	self.modules.Character:UpdateQueuedItems()
+	self:SendMessage("IS_UPDATE_QUEUED")
 end
 
 -- Equip a single item into a slot
@@ -261,7 +262,7 @@ function ItemSets:EquipSingle(equipSlot, link)
 		self.db.profile.queued[inventoryID] = link
 		
 		-- Update queued icon
-		self.modules.Character:UpdateQueuedItems()
+		self:SendMessage("IS_UPDATE_QUEUED")
 		return
 	end
 	
@@ -285,10 +286,6 @@ function ItemSets:EquipSingle(equipSlot, link)
 	PickupInventoryItem(inventoryID)
 end
 
--- NOTE: This will need to do a delay, due to the fact that trying to go from a 1H/Shield -> 2H won't work
--- you have to unequip the Shield, then swap the 1H/2H.
--- Check if we can swap the item in combat
--- Check if it's in one slot but should be in another, eg, in ring #1 but needs to be in ring #2
 function ItemSets:EquipByName(name)
 	local set = self.db.profile.sets[name]
 	if( not set ) then
@@ -353,11 +350,15 @@ function ItemSets:Equip(set, name)
 		end
 		
 		if( self.db.profile.queued.active ) then
+			self.db.profile.queued.name = name
 			self.db.profile.queued.helm = set.helm
 			self.db.profile.queued.cloak = set.cloak
 		
-			self.modules.Character:UpdateQueuedItems()
+			self:SendMessage("IS_UPDATE_QUEUED")
 		end
+	-- Set this as active
+	else
+		self.db.profile.setName = name
 	end
 	
 	-- Nothing we can equip while in combat, or dead.
@@ -372,8 +373,31 @@ function ItemSets:Equip(set, name)
 		local link = set[inventoryID]
 		
 		-- Item already equipped, so we can remove it from the list
-		if( IsEquippedItem(link) ) then
+		if( self:GetBaseData(inventoryLink) == link ) then
 			table.remove(equipOrder, i)
+		
+		-- It's not equipped in the right slot, but it IS equipped
+		elseif( IsEquippedItem(link) ) then
+			-- Find out what slot is IS in
+			for slot, invID in pairs(self.equipSlots) do
+				local equipLink = self:GetBaseData(GetInventoryItemLink("player", invID))
+				if( invID ~= inventoryID and equipLink == link ) then
+					
+					-- Swap
+					PickupInventoryItem(invID)
+					PickupInventoryItem(inventoryID)
+					
+					-- Remove the slot we equipped it INTO
+					table.remove(equipOrder, inventoryID)
+					
+					-- If the slot we just swapped it from now has the ring we wanted anyway, remove it
+					-- Basically, if Ring A = Slot #1, Ring B = Slot #2, A is supposed to be in #2 and B is supposed to be in #1
+					-- then we just swapped them and removed both from the equip order
+					if( eqipLink == set[invID] ) then
+						table.remove(equipOrder, invID)
+					end
+				end
+			end
 		
 		-- Check if it has a prismatic gem, and we should unequip the item fully
 		elseif( inventoryLink and link and link ~= "" ) then
@@ -415,6 +439,7 @@ function ItemSets:Equip(set, name)
 		local link = set[inventoryID]
 		local bag, slot, type = self:FindItem(link)
 		
+		-- Found it in our bags
 		if( bag and slot ) then
 			PickupContainerItem(bag, slot)
 			
