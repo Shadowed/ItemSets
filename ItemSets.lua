@@ -388,14 +388,21 @@ function ItemSets:Equip(set, name)
 					PickupInventoryItem(inventoryID)
 					
 					-- Remove the slot we equipped it INTO
-					table.remove(equipOrder, inventoryID)
+					table.remove(equipOrder, i)
 					
 					-- If the slot we just swapped it from now has the ring we wanted anyway, remove it
 					-- Basically, if Ring A = Slot #1, Ring B = Slot #2, A is supposed to be in #2 and B is supposed to be in #1
 					-- then we just swapped them and removed both from the equip order
-					if( eqipLink == set[invID] ) then
-						table.remove(equipOrder, invID)
+					if( equipLink == set[invID] ) then
+						-- Remove the other slot that got swapped around
+						for i=#(equipOrder), 1, -1 do
+							if( equipOrder[i] == invID ) then
+								table.remove(equipOrder, i)
+								break
+							end
+						end
 					end
+					break
 				end
 			end
 		
