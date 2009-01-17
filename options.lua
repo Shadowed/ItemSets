@@ -132,20 +132,21 @@ local function selectSet(self)
 	lockedSet = lockedSet ~= self.name and self.name or nil
 
 	-- Reset status
-	Config.frame.setFrame.saveSet:Disable()
-	Config.frame.setFrame.deleteSet:Disable()
-	Config.frame.setFrame.showHelm:Disable()
-	Config.frame.setFrame.showCloak:Disable()
-	Config.frame.setFrame.setName:GetScript("OnEditFocusLost")(Config.frame.setFrame.setName)
+	local setFrame = Config.frame.setFrame
+	setFrame.saveSet:Disable()
+	setFrame.deleteSet:Disable()
+	setFrame.showHelm:Disable()
+	setFrame.showCloak:Disable()
+	setFrame.setName:GetScript("OnEditFocusLost")(setFrame.setName)
 
-	for _, row in pairs(Config.frame.setFrame.rows) do
+	for _, row in pairs(setFrame.rows) do
 		if( row.name == lockedSet ) then
-			Config.frame.setFrame.saveSet:Enable()
-			Config.frame.setFrame.deleteSet:Enable()
-			Config.frame.setFrame.showHelm:Enable()
-			Config.frame.setFrame.showCloak:Enable()
-			Config.frame.setFrame.setName:GetScript("OnEditFocusGained")(Config.frame.setFrame.setName)
-			Config.frame.setFrame.setName:SetText(self.name)
+			setFrame.saveSet:Enable()
+			setFrame.deleteSet:Enable()
+			setFrame.showHelm:Enable()
+			setFrame.showCloak:Enable()
+			setFrame.setName:GetScript("OnEditFocusGained")(setFrame.setName)
+			setFrame.setName:SetText(self.name)
 
 			row:LockHighlight()
 			displaySet(self.name)
@@ -241,6 +242,7 @@ function Config:UpdateSetRows()
 		button:Hide()
 	end
 		
+	-- Figure out how many we have quickly
 	totalSets = 0
 	for name in pairs(ItemSets.db.profile.sets) do
 		totalSets = totalSets + 1
@@ -248,9 +250,18 @@ function Config:UpdateSetRows()
 	
 	FauxScrollFrame_Update(self.frame.setFrame.scroll, totalSets, MAX_SETS_SHOWN - 1, 15)
 
-	local offset = FauxScrollFrame_GetOffset(self.frame.setFrame.scroll)
+	-- Show help text + exit, nadda to update
+	if( totalSets == 0 ) then
+		self.frame.setFrame.description:Show()
+		return
+	end
+
+	-- Update rows
+	self.frame.setFrame.description:Hide()
+
 	totalSets = 0
-		
+	
+	local offset = FauxScrollFrame_GetOffset(self.frame.setFrame.scroll)
 	local usedRows = 0
 	for name, items in pairs(ItemSets.db.profile.sets) do
 		totalSets = totalSets + 1
@@ -342,6 +353,9 @@ function Config:Open()
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
 	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	frame:SetScript("OnShow", function()
+		Config:UpdateSetRows()
+	end)
 	self.frame = frame
 	
 	if( ItemSets.db.profile.position ) then
@@ -518,9 +532,7 @@ function Config:Open()
 	
 	frame.setFrame.scroll = scroll
 	frame.setFrame.child = child
-	
-	self:UpdateSetRows()
-	
+		
 	-- Save/Delete/Show Cloak/Show Helm
 	local saveSet = CreateFrame("Button", nil, frame.setFrame, "UIPanelButtonGrayTemplate")
 	saveSet:SetText(L["Save"])
@@ -596,6 +608,27 @@ function Config:Open()
 	setName:GetScript("OnEditFocusLost")(setName)
 	
 	frame.setFrame.setName = setName
+	
+	-- Descriptions
+	frame.setFrame.description = frame.setFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	frame.setFrame.description:SetPoint("TOPLEFT", frame.setFrame, "TOPLEFT", 2, -2)
+	frame.setFrame.description:SetText(L["You must type a set name in first in the text box below, and hit enter to create it.\n\nThen select it when it appears to make it editable."])
+	frame.setFrame.description:SetMultilineIndent(false)
+	frame.setFrame.description:SetJustifyH("LEFT")
+	frame.setFrame.description:SetJustifyV("TOP")
+	frame.setFrame.description:SetHeight(250)
+	frame.setFrame.description:SetWidth(160)
+	frame.setFrame.description:Hide()
+
+	-- Initialize it
+	self:UpdateSetRows()
+	
+	-- Select a default set
+	local setName = ItemSets.db.profile.setName
+	if( setName and ItemSets.db.profile.sets[setName] ) then
+		frame.setFrame.name = setName
+		selectSet(frame.setFrame)
+	end
 end
 
 SLASH_ITEMSETS1 = "/is"

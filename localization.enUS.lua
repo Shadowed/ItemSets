@@ -45,4 +45,6 @@ ItemSetLocals = {
 	["Pushes all the items from this set into your bank, from your inventory."] = "Pushes all the items from this set into your bank, from your inventory.",
 	
 	["Cannot create set named \"%s\" one already exists with that name."] = "Cannot create set named \"%s\" one already exists with that name.",
+	
+	["You must type a set name in first in the text box below, and hit enter to create it.\n\nThen select it when it appears to make it editable."] = "You must type a set name in first in the text box below, and hit enter to create it.\n\nThen select it when it appears to make it editable.",
 }
