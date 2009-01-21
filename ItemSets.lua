@@ -11,7 +11,7 @@ local equipSlots = {["HeadSlot"] = -1, ["NeckSlot"] = -1, ["ShoulderSlot"] = -1,
 local badTGWeaponType = {["Polearms"] = true, ["Staves"] = true, ["Fishing Poles"] = true}
 local combatSwappable = {[0] = true, [16] = true, [17] = true, [18] = true}
 local bankSlots = {11, 10, 9, 8, 7, 6, 5, -1}
-local equipIDs, badItems, equipOrder, checkOnClear, lockedSlots = {}, {}, {}, {}, {}
+local equipIDs, badItems, equipOrder, lockedSlots = {}, {}, {}, {}
 local playerClass, equipQueued
 
 function ItemSets:OnInitialize()
@@ -24,15 +24,7 @@ function ItemSets:OnInitialize()
 	}
 
 	self.db = LibStub:GetLibrary("AceDB-3.0"):New("ItemSetsDB", self.defaults)
-	
-	-- Throttle ITEM_LOCK_CHANGED calls
-	self:RegisterEvent("ITEM_LOCK_CHANGED", function()
-		if( checkLock ) then
-			ItemSets.timeElapsed = 0
-			ItemSets.frame:Show()
-		end
-	end)
-	
+		
 	-- Don't rely on BankFrame in case they customized it
 	self:RegisterEvent("BANKFRAME_CLOSED", function() ItemSets.isBankOpen = nil end)
 	self:RegisterEvent("BANKFRAME_OPENED", function() ItemSets.isBankOpen = true end)
@@ -126,6 +118,7 @@ function ItemSets:PushSet(name)
 	
 	self:Print(string.format(L["Pushed set \"%s\" into your bank."], name))
 end
+
 -- Bring a set from your bank, into your inventory
 function ItemSets:PullSet(name)
 	if( not self.isBankOpen ) then
@@ -305,18 +298,50 @@ function ItemSets:Is2HWeapon(equippedLink)
 	return select(9, GetItemInfo(equippedLink)) == "INVTYPE_2HWEAPON"
 end
 
+-- Sort so it does non prismatic slots, then prismatics
+local prismaticIDs = {}
+local function sortItems(a, b)
+	if( prismaticIDs[a] ) then
+		return false
+	elseif( prismaticIDs[b] ) then
+		return true
+	else
+		return a < b
+	end
+end
+
 function ItemSets:Equip(set, name)
 	self:ResetLocks()
 	
-	-- Check what the class can use
+	-- Check if it's a warrior with TG
 	local hasTitansGrip
 	if( playerClass == "WARRIOR" ) then
 		hasTitansGrip = (select(5, GetTalentInfo(2, 26)) > 0)
 	end
 	
+	-- Reset what was a prismatic
+	for k in pairs(prismaticIDs) do prismaticIDs[k] = nil end
 	-- Reset equip order
 	for i=#(equipOrder), 1, -1 do table.remove(equipOrder, i) end
-	
+	-- Load in the defaults
+	for _, v in pairs(equipIDs) do if( v ~= 16 and v ~= 17 ) then table.insert(equipOrder, v) end end
+
+	-- Figure out what has a prismatic gem in it
+	for inventoryID, link in pairs(set) do
+		if( link ~= "" and type(link) == "string" ) then
+			for i=1, 3 do
+				local gemLink = select(2, GetItemGem(link, i))
+				if( gemLink and self:IsSpecialGem(gemLink) ) then
+					prismaticIDs[inventoryID] = true
+					break
+				end
+			end
+		end
+	end
+		
+	-- Sort them so that we equip the non-prismatic slots first
+	table.sort(equipOrder, sortItems)
+
 	-- If the player has the Titan's Grip talent, and there MH is an invalid TG weapon we must swap the MH first, then the OH
 	-- Or, if the MH is a 2H we need to swap the MH first, then the OH
 	if( self:Is2HWeapon(GetInventoryItemLink("player", 16)) or ( hasTitansGrip and badTGWeaponType[select(7, GetItemInfo(GetInventoryItemLink("player", 16)))] ) ) then
@@ -326,9 +351,6 @@ function ItemSets:Equip(set, name)
 		table.insert(equipOrder, 17)
 		table.insert(equipOrder, 16)
 	end
-
-	-- Load in the defaults
-	for _, inventoryID in pairs(equipIDs) do if( v ~= 16 and v ~= 17 ) then table.insert(equipOrder, inventoryID) end end
 	
 	-- If we're in combat, only let us swap certain items (Ranged, MH, Ammo)
 	local isDead = self:IsDead()
@@ -405,39 +427,6 @@ function ItemSets:Equip(set, name)
 					break
 				end
 			end
-		
-		-- Check if it has a prismatic gem, and we should unequip the item fully
-		elseif( inventoryLink and link and link ~= "" ) then
-			for i=1, 3 do
-				local gemLink = select(2, GetItemGem(inventoryLink, i))
-				if( gemLink and self:IsSpecialGem(gemLink) ) then
-					local freeBag, freeSlot = self:FindEmptyInventorySlot()
-					if( not freeBag or not freeSlot ) then
-						self:Print(L["Cannot perform swap, you have no space in your bags left."])
-						break
-					end
-					
-					self:LockSlot(freeBag, freeSlot)
-					
-					PickupInventoryItem(inventoryID)
-					PickupContainerItem(freeBag, freeSlot)
-					
-					-- If we know the location of item we're going to equip it, then will put ours there
-					-- after we're done, otherwise we set it to be compacted.
-					local bag, slot = self:FindItem(link)
-					if( bag and slot ) then
-						checkOnClear[inventoryLink] = bag .. ":" .. slot
-						
-						-- Also lock it up
-						self:LockSlot(bag, slot)
-					else
-						checkOnClear[inventoryLink] = true
-					end
-					
-					checkLock = true
-					break
-				end
-			end
 		end
 	end
 	
@@ -499,59 +488,6 @@ function ItemSets:Equip(set, name)
 		self:Print(string.format(L["Unable to equip all items for \"%s\": %s"], name, items))
 
 		for i=#(badItems), 1, -1 do table.remove(badItems, i) end
-	end
-end
-
--- Throttle our ITEM_LOCK_CHANGED calls
-ItemSets.frame = CreateFrame("Frame")
-ItemSets.frame.timeElapsed = 0
-ItemSets.frame:Hide()
-ItemSets.frame:SetScript("OnUpdate", function(self, elapsed)
-	self.timeElapsed = self.timeElapsed + elapsed
-
-	if( self.timeElapsed >= 0.50 ) then
-		ItemSets:ITEM_LOCK_CHANGED()
-
-		self.timeElapsed = 0
-		self:Hide()
-	end
-end)
-
--- Now we can check if we need to move any items around
-function ItemSets:ITEM_LOCK_CHANGED()
-	if( checkLock ) then
-		local total = 0
-		
-		for link, info in pairs(checkOnClear) do
-			local bag, slot, location = self:FindItem(self:GetBaseData(link))
-			if( location == "inventory" ) then
-				total = total - 1
-				checkOnClear[link] = nil
-				
-				-- If it's a boolean, find a spare slot, if it's not, use the one provided
-				local freeBag, freeSlot
-				if( type(info) == "boolean" ) then
-					freeBag, freeSlot = self:FindEmptyInventorySlot()
-				else
-					freeBag, freeSlot = string.split(":", info)
-				end
-				
-				-- Find it!
-				if( freeBag and freeSlot ) then
-					self:LockSlot(freeBag, freeSlot)
-					self:UnlockSlot(bag, slot)
-					
-					PickupContainerItem(bag, slot)
-					PickupContainerItem(freeBag, freeSlot)
-				end
-			end
-
-			total = total + 1
-		end
-		
-		if( total == 0 ) then
-			checkLock = nil
-		end
 	end
 end
 
