@@ -262,11 +262,45 @@ function ItemSets:EquipSingle(equipSlot, link)
 	-- Unequipping
 	if( link == "" ) then
 		local freeBag, freeSlot = self:FindEmptyInventorySlot()
+		if( not freeBag or not freeSlot ) then
+			self:Print(L["You do not have enough free space to perform this action."])
+		end
+
 		self:LockSlot(freeBag, freeSlot)
 		
 		PickupInventoryItem(inventoryID)
 		PickupContainerItem(freeBag, freeSlot)
 		return
+	end
+	
+	-- We're swapping something into our OH, if the MH has a 2H weapon then swap the MH out first
+	if( equipSlot == "SecondaryHandSlot" ) then
+		local MHLink = GetInventoryItemLink("player", 16)
+		if( MHLink and self:Is2HWeapon(MHLink) and select(9, GetItemInfo(link)) == "INVTYPE_HOLDABLE" ) then
+			local freeBag, freeSlot = self:FindEmptyInventorySlot()
+			if( not freeBag or not freeSlot ) then
+				self:Print(L["You do not have enough free space to perform this action."])
+			end
+			
+			self:LockSlot(freeBag, freeSlot)
+			
+			PickupInventoryItem(16)
+			PickupContainerItem(freeBag, freeSlot)
+		end
+	-- They're swapping something into the MH thats a 2H, and they have something on the OH
+	elseif( equipSlot == "MainHandSlot" and GetInventoryItemLink("player", 17) and self:Is2HWeapon(link) ) then
+		-- They either don't have titans grip, they do and the OH weapon isn't a valid one to use with a MH
+		if( not hasTitansGrip or badTGWeaponType[select(7, GetItemInfo(link)) or ""] ) then
+			local freeBag, freeSlot = self:FindEmptyInventorySlot()
+			if( not freeBag or not freeSlot ) then
+				self:Print(L["You do not have enough free space to perform this action."])
+			end
+			
+			self:LockSlot(freeBag, freeSlot)
+			
+			PickupInventoryItem(17)
+			PickupContainerItem(freeBag, freeSlot)
+		end
 	end
 	
 	-- Equipping!
@@ -280,7 +314,15 @@ function ItemSets:EquipSingle(equipSlot, link)
 end
 
 function ItemSets:EquipByName(name)
-	local set = self.db.profile.sets[name]
+	local set
+	for setName, data in pairs(self.db.profile.sets) do
+		if( string.lower(setName) == string.lower(name) ) then
+			name = setName
+			set = data
+			break
+		end
+	end
+	
 	if( not set ) then
 		self:Print(string.format(L["Cannot find any sets named \"%s\"."], name))
 		return
@@ -344,7 +386,8 @@ function ItemSets:Equip(set, name)
 
 	-- If the player has the Titan's Grip talent, and there MH is an invalid TG weapon we must swap the MH first, then the OH
 	-- Or, if the MH is a 2H we need to swap the MH first, then the OH
-	if( self:Is2HWeapon(GetInventoryItemLink("player", 16)) or ( hasTitansGrip and badTGWeaponType[select(7, GetItemInfo(GetInventoryItemLink("player", 16)))] ) ) then
+	local MHLink = GetInventoryItemLink("player", 16)
+	if( MHLink and ( self:Is2HWeapon(MHLink) or ( hasTitansGrip and badTGWeaponType[select(7, GetItemInfo(MHLink)) or ""] ) ) ) then
 		table.insert(equipOrder, 16)
 		table.insert(equipOrder, 17)
 	else

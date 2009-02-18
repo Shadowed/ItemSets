@@ -14,6 +14,8 @@ ItemSetLocals = {
 	["Pushed set \"%s\" into your bank."] = "Pushed set \"%s\" into your bank.",
 	["Pulled set \"%s\" into your inventory."] = "Pulled set \"%s\" into your inventory.",
 	
+	["You do not have enough free space to perform this action."] = "You do not have enough free space to perform this action.",
+	
 	-- Gem types
 	["Unique-Equipped"] = "Unique-Equipped",
 	["Unique Equipped: (.+) %(([0-9]+)%)"] = "Unique Equipped: (.+) %(([0-9]+)%)",

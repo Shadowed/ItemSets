@@ -184,9 +184,13 @@ local function createNewSet(self)
 	
 	if( self.name == "" ) then
 		return	
-	elseif( ItemSets.db.profile.sets[self.name] ) then
-		ItemSets:Print(string.format(L["Cannot create set named \"%s\" one already exists with that name."], self.name))
-		return
+	else
+		for name in pairs(ItemSets.db.profile.sets) do
+			if( string.lower(name) == string.lower(self.name) ) then
+				ItemSets:Print(string.format(L["Cannot create set named \"%s\" one already exists with that name."], self.name))
+				return
+			end
+		end
 	end
 
 	ItemSets.db.profile.sets[self.name] = {helm = true, cloak = true}
@@ -234,6 +238,10 @@ local function showTextTooltip(self)
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	GameTooltip:AddLine(self.tooltip, 1.0, 1.0, 1.0, true)
 	GameTooltip:Show()
+end
+
+local function sortSetList(a, b)
+	return a.name < b.name
 end
 
 -- Update set rows
@@ -300,13 +308,6 @@ function Config:UpdateSetRows()
 				row.pull:SetScript("OnEnter", showTextTooltip)
 				row.pull:SetScript("OnLeave", hideTooltip)
 				row.pull.tooltip = L["Pulls all the items from this set into your inventory, from your bank."]
-
-				if( usedRows > 1 ) then
-					row:SetPoint("TOPLEFT", self.frame.setFrame.rows[usedRows - 1], "BOTTOMLEFT", 0, -8)
-				else
-					row:SetPoint("TOPLEFT", self.frame.setFrame, "TOPLEFT", 2, -2)
-				end
-
 				self.frame.setFrame.rows[usedRows] = row
 			end
 			
@@ -319,6 +320,19 @@ function Config:UpdateSetRows()
 			row.name = name
 			row:SetText(name)
 			row:Show()
+		end
+	end
+	
+	-- Now sort it
+	table.sort(self.frame.setFrame.rows, sortSetList)
+
+	for id, row in pairs(self.frame.setFrame.rows) do
+		if( id > 1 ) then
+			row:ClearAllPoints()
+			row:SetPoint("TOPLEFT", self.frame.setFrame.rows[id - 1], "BOTTOMLEFT", 0, -8)
+		else
+			row:ClearAllPoints()
+			row:SetPoint("TOPLEFT", self.frame.setFrame, "TOPLEFT", 2, -2)
 		end
 	end
 end
